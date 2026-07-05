@@ -125,8 +125,8 @@ s-ui
 
       "tls": {
         "enabled": true,
-        "certificate_path": "/etc/ssl/fullchain.pem",
-        "key_path": "/etc/ssl/privkey.pem"
+        "certificate_path": "/etc/sing-box/server.crt",
+        "key_path": "/etc/sing-box/server.key"
       }
     }
 ```
@@ -145,8 +145,8 @@ s-ui
       ],
       "tls": {
         "enabled": true,
-        "certificate_path": "/etc/ssl/fullchain.pem",
-        "key_path": "/etc/ssl/privkey.pem"
+        "certificate_path": "/etc/sing-box/server.crt",
+        "key_path": "/etc/sing-box/server.key"
       }
     }
 ```
