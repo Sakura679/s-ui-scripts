@@ -405,8 +405,7 @@ add_vless_node() {
     if [ "$use_tls" = "y" ] || [ "$use_tls" = "Y" ]; then
         read -p "请输入 TLS 证书路径: " cert_path
         read -p "请输入 TLS 密钥路径: " key_path
-        rea        
-    tls_config=$(cat <<EOFTLS
+        tls_config=$(cat <<EOFTLS
     "tls": {
       "enabled": true,
       "certificate_path": "$cert_path",
