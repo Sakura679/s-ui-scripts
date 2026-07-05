@@ -128,7 +128,7 @@ download_singbox() {
     fi
     
     log_info "解压文件..."
-    tar -xzf "$FILENAME" --strip-components=1
+    tar -xzf "$FILENAME" -C ./ --strip-components=1
     
     # 查找 sing-box 二进制文件
     if [ -f "sing-box-${SING_BOX_VERSION}-linux-${ARCH_NAME}/sing-box" ]; then
