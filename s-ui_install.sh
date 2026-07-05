@@ -174,6 +174,7 @@ install_sing_box() {
     print_info "安装 sing-box..."
     
     cd /tmp
+    mkdir -p ./singbox
     tar -xzf "${FILENAME}" -C ./singbox
 
     cd ./singbox
