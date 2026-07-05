@@ -175,7 +175,7 @@ install_sing_box() {
     
     cd /tmp
     mkdir -p ./singbox
-    tar -xzf "${FILENAME}" -C ./singbox
+    tar -xzf "${FILENAME}" -C /tmp/singbox --strip-components=1
 
     cd ./singbox
     if [ -f "sing-box" ]; then
