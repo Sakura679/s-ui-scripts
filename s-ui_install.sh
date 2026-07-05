@@ -12,7 +12,7 @@ set -e
 # ==================== 配置部分 ====================
 SING_BOX_VERSION="1.14.0-alpha.35"
 SING_BOX_RELEASE_URL="https://github.com/SagerNet/sing-box/releases/download/v${SING_BOX_VERSION}"
-SING_BOX_BIN="/usr/local/bin/sing-box"
+SING_BOX_BIN="/usr/local/bin"
 SING_BOX_CONFIG_DIR="/etc/sing-box"
 SING_BOX_LOG_DIR="/var/log/sing-box"
 SING_BOX_SERVICE="/etc/systemd/system/sing-box.service"
@@ -174,26 +174,18 @@ install_sing_box() {
     print_info "安装 sing-box..."
     
     cd /tmp
-    mkdir -p ./singbox
-    tar -xzf "${FILENAME}" -C /tmp/singbox --strip-components=1
+    tar -xzf "${FILENAME}" -C "$SING_BOX_BIN" --strip-components=1
 
-    cd ./singbox
-    if [ -f "sing-box" ]; then
-        chmod +x sing-box
-        mv sing-box "$SING_BOX_BIN"
-    else
-        print_error "解压失败或找不到 sing-box 二进制文件"
-        exit 1
-    fi
+    chmod +x "$SING_BOX_BIN/sing-box"
     
     # 创建配置目录
     mkdir -p "$SING_BOX_CONFIG_DIR"
     mkdir -p "$SING_BOX_LOG_DIR"
     
     # 验证安装
-    if $SING_BOX_BIN version &>/dev/null; then
+    if "$SING_BOX_BIN/sing-box" version &>/dev/null; then
         print_success "sing-box 安装成功"
-        $SING_BOX_BIN version
+        "$SING_BOX_BIN/sing-box" version
     else
         print_error "sing-box 安装失败"
         exit 1
@@ -1890,7 +1882,7 @@ main_install() {
     echo "║        安装完成！                      ║"
     echo "╚════════════════════════════════════════╝"
     echo ""
-    print_success "Sing-box 已安装到: $SING_BOX_BIN"
+    print_success "Sing-box 已安装到: $SING_BOX_BIN/sing-box"
     print_success "配置文件位置: $SING_BOX_CONFIG_DIR/config.json"
     print_success "日志位置: $SING_BOX_LOG_DIR"
     echo ""
@@ -1925,7 +1917,7 @@ main_install() {
     echo "查看服务状态:    ${GREEN}systemctl status sing-box${NC}"
     echo "查看实时日志:    ${GREEN}journalctl -u sing-box -f${NC}"
     echo "查看历史日志:    ${GREEN}journalctl -u sing-box -n 100${NC}"
-    echo "验证配置文件:    ${GREEN}$SING_BOX_BIN check -c $SING_BOX_CONFIG_DIR/config.json${NC}"
+    echo "验证配置文件:    ${GREEN}$SING_BOX_BIN/sing-box check -c $SING_BOX_CONFIG_DIR/config.json${NC}"
     echo ""
     echo "╔════════════════════════════════════════╗"
     echo "║        管理面板使用                    ║"
@@ -1987,7 +1979,7 @@ uninstall() {
     systemctl disable sing-box 2>/dev/null || true
     
     # 删除文件
-    rm -f "$SING_BOX_BIN"
+    rm -f "$SING_BOX_BIN/sing-box"
     rm -f "$SING_BOX_SERVICE"
     rm -f "/usr/local/bin/s-ui"
     rm -f "$S_UI_SERVICE"
