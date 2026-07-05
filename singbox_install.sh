@@ -161,6 +161,9 @@ create_config() {
   }
 }
 EOF
+
+    log_info "生成自签证书"
+    openssl req -x509 -nodes -newkey ec:<(openssl ecparam -name prime256v1) -keyout /etc/sing-box/server.key -out /etc/sing-box/server.crt -subj "/CN=bing.com" -days 36500
     
     log_info "配置文件已创建"
 }
