@@ -63,92 +63,108 @@ s-ui
 加密方式: aes-128-gcm, aes-256-gcm, chacha20-poly1305
 配置示例：
 ```json
-{
-  "type": "shadowsocks",
-  "tag": "ss-in",
-  "listen": "0.0.0.0",
-  "listen_port": 8388,
-  "method": "aes-256-gcm",
-  "password": "your-password"
-}
+    {
+      "type": "shadowsocks",
+      "tag": "ss-in",
+      "listen": "0.0.0.0",
+      "listen_port": 12123,
+      "method": "aes-256-gcm",
+      "password": "Iq6NSSXsU5GypaQYlQaJ4e9P40zTb7mHmv4tynH5qHY="
+    }
 ```
 2. VLESS
 支持 TCP/TLS
 配置示例：
 ```json
-{
-  "type": "vless",
-  "tag": "vless-in",
-  "listen": "0.0.0.0",
-  "listen_port": 443,
-  "users": [
     {
-      "uuid": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+      "type": "vless",
+      "tag": "reality-in",
+      "listen": "0.0.0.0",
+      "listen_port": 12123,
+
+      "users": [
+        {
+          "uuid": "26800d23-57be-40b0-8fbd-b9edc0194082",
+          "flow": "xtls-rprx-vision"
+        }
+      ],
+
+      "tls": {
+        "enabled": true,
+        "reality": {
+          "enabled": true,
+          "handshake": {
+            "server": "gw.alicdn.com",
+            "server_port": 443
+          },
+
+          "private_key": "cP-CQW7_ltG-dStdp10eKzTPOcv_o3YYeqdD5HZC10Q",
+
+          "short_id": [
+            "db1df8"
+          ]
+        }
+      }
     }
-  ],
-  "tls": {
-    "enabled": true,
-    "certificate_path": "/path/to/cert.pem",
-    "key_path": "/path/to/key.pem"
-  }
-}
 ```
 3. Hysteria2 (HY2)
 高性能协议
 配置示例：
 ```json
-{
-  "type": "hysteria2",
-  "tag": "hy2-in",
-  "listen": "0.0.0.0",
-  "listen_port": 443,
-  "users": [
     {
-      "password": "your-password"
+      "type": "hysteria2",
+      "tag": "hy2-in",
+      "listen": "0.0.0.0",
+      "listen_port": 12123,
+
+      "users": [
+        {
+          "password": "/31/ZomnpGLMMaIJjDg/ppDb"
+        }
+      ],
+
+      "tls": {
+        "enabled": true,
+        "certificate_path": "/etc/ssl/fullchain.pem",
+        "key_path": "/etc/ssl/privkey.pem"
+      }
     }
-  ],
-  "tls": {
-    "enabled": true,
-    "certificate_path": "/path/to/cert.pem",
-    "key_path": "/path/to/key.pem"
-  }
-}
 ```
 4. Trojan
 配置示例：
 ```json
-{
-  "type": "trojan",
-  "tag": "trojan-in",
-  "listen": "0.0.0.0",
-  "listen_port": 443,
-  "users": [
     {
-      "password": "your-password"
+      "type": "trojan",
+      "tag": "trojan-in",
+      "listen": "0.0.0.0",
+      "listen_port": 12123,
+      "users": [
+        {
+          "password": "Iq6NSSXsU5GypaQYlQaJ4e9P40zTb7mHmv4tynH5qHY="
+        }
+      ],
+      "tls": {
+        "enabled": true,
+        "certificate_path": "/etc/ssl/fullchain.pem",
+        "key_path": "/etc/ssl/privkey.pem"
+      }
     }
-  ],
-  "tls": {
-    "enabled": true,
-    "certificate_path": "/path/to/cert.pem",
-    "key_path": "/path/to/key.pem"
-  }
-}
 ```
 5. VMess
 配置示例：
 ```json
-{
-  "type": "vmess",
-  "tag": "vmess-in",
-  "listen": "0.0.0.0",
-  "listen_port": 8001,
-  "users": [
     {
-      "uuid": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
-      "security": "auto"
+      "type": "vmess",
+      "tag": "vmess-in",
+      "listen": "0.0.0.0",
+      "listen_port": 12123,
+      "users": [
+        {
+          "uuid": "26800d23-57be-40b0-8fbd-b9edc0194082",
+          "security": "auto"
+        }
+      ]
     }
-  ]
-}
 ```
 ### 五、常用命令
 ```bash
