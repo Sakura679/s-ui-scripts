@@ -2,6 +2,12 @@
 ## 📋 使用说明
 ### 一、快速安装
 ```bash
+# 一键安装
+bash <(https://raw.githubusercontent.com/Sakura679/s-ui-scripts/main/s-ui_install.sh)
+```
+
+
+```bash
 # 下载脚本
 curl -O https://raw.githubusercontent.com/SagerNet/sing-box/main/install.sh
 
