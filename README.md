@@ -66,7 +66,7 @@ s-ui
     {
       "type": "shadowsocks",
       "tag": "ss-in",
-      "listen": "0.0.0.0",
+      "listen": "::",
       "listen_port": 12123,
       "method": "aes-256-gcm",
       "password": "Iq6NSSXsU5GypaQYlQaJ4e9P40zTb7mHmv4tynH5qHY="
@@ -79,7 +79,7 @@ s-ui
     {
       "type": "vless",
       "tag": "reality-in",
-      "listen": "0.0.0.0",
+      "listen": "::",
       "listen_port": 12123,
 
       "users": [
@@ -115,7 +115,7 @@ s-ui
     {
       "type": "hysteria2",
       "tag": "hy2-in",
-      "listen": "0.0.0.0",
+      "listen": "::",
       "listen_port": 12123,
 
       "users": [
@@ -137,7 +137,7 @@ s-ui
     {
       "type": "trojan",
       "tag": "trojan-in",
-      "listen": "0.0.0.0",
+      "listen": "::",
       "listen_port": 12123,
       "users": [
         {
@@ -157,7 +157,7 @@ s-ui
     {
       "type": "vmess",
       "tag": "vmess-in",
-      "listen": "0.0.0.0",
+      "listen": "::",
       "listen_port": 12123,
       "users": [
         {
