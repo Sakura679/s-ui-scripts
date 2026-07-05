@@ -1,4 +1,8 @@
 # s-ui-scripts
+## 仅仅使用singbox
+```bash
+bash <(curl -Ls https://raw.githubusercontent.com/Sakura679/s-ui-scripts/main/singbox_install.sh)
+```
 ## 📋 使用说明
 ### 一、快速安装
 ```bash
