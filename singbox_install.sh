@@ -150,28 +150,10 @@ create_config() {
     cat > "$WORK_DIR/conf/config.json" << 'EOF'
 {
   "log": {
-    "disabled": false,
     "level": "info",
     "timestamp": true
   },
-  "inbounds": [
-    {
-      "type": "socks",
-      "listen": "127.0.0.1",
-      "listen_port": 1080,
-      "users": [
-        {
-          "username": "user",
-          "password": "pass"
-        }
-      ]
-    },
-    {
-      "type": "http",
-      "listen": "127.0.0.1",
-      "listen_port": 1081
-    }
-  ],
+  "inbounds": [],
   "outbounds": [
     {
       "type": "direct",
@@ -183,12 +165,8 @@ create_config() {
     }
   ],
   "route": {
-    "rules": [
-      {
-        "inbound": "socks",
-        "outbound": "direct"
-      }
-    ]
+    "rules": [],
+    "final": "direct"
   }
 }
 EOF
