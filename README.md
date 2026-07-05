@@ -91,6 +91,7 @@ s-ui
 
       "tls": {
         "enabled": true,
+        "server_name": "gw.alicdn.com",
         "reality": {
           "enabled": true,
           "handshake": {
