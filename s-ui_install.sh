@@ -175,10 +175,13 @@ install_sing_box() {
     
     cd /tmp
     tar -xzf "${FILENAME}"
+
+    # 查找 sing-box 二进制文件（处理多层目录结构）
+    local sing_box_bin=$(find . -name "sing-box" -type f 2>/dev/null | head -1)
     
-    if [ -f "sing-box" ]; then
-        chmod +x sing-box
-        mv sing-box "$SING_BOX_BIN"
+    if [ -f "sing_box_bin" ]; then
+        chmod +x sing_box_bin
+        mv sing_box_bin "$SING_BOX_BIN"
     else
         print_error "解压失败或找不到 sing-box 二进制文件"
         exit 1
