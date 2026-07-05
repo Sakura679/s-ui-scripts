@@ -3,7 +3,7 @@
 ### 一、快速安装
 ```bash
 # 一键安装
-bash <(https://raw.githubusercontent.com/Sakura679/s-ui-scripts/main/s-ui_install.sh)
+bash <(curl -Ls https://raw.githubusercontent.com/Sakura679/s-ui-scripts/main/s-ui_install.sh)
 ```
 
 
