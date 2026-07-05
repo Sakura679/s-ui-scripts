@@ -141,31 +141,7 @@ check_dependencies() {
 }
 
 # 下载 sing-box
-download_sing_box() {
-    print_info "下载 sing-box $SING_BOX_VERSION..."
-    
-    # 确定下载文件名
-    if [ "$LIBC_TYPE" = "musl" ]; then
-        FILENAME="sing-box-${SING_BOX_VERSION}-linux-${SING_BOX_ARCH}-musl.tar.gz"
-    else
-        FILENAME="sing-box-${SING_BOX_VERSION}-linux-${SING_BOX_ARCH}.tar.gz"
-    fi
-    
-    DOWNLOAD_URL="${SING_BOX_RELEASE_URL}/${FILENAME}"
-    
-    print_info "下载链接: $DOWNLOAD_URL"
-    
-    if ! curl -L -o "/tmp/${FILENAME}" "$DOWNLOAD_URL" 2>/dev/null; then
-        print_error "下载失败，尝试备用链接..."
-        # 尝试不带 musl 的版本
-        FILENAME="sing-box-${SING_BOX_VERSION}-linux-${SING_BOX_ARCH}.tar.gz"
-        DOWNLOAD_URL="${SING_BOX_RELEASE_URL}/${FILENAME}"
-        curl -L -o "/tmp/${FILENAME}" "$DOWNLOAD_URL" || {
-            print_error "无法下载 sing-box"
-            exit 1
-        }
-    fi
-    
+download_sing_box() {    
     print_success "下载完成"
 }
 
@@ -174,10 +150,6 @@ install_sing_box() {
     print_info "安装 sing-box..."
     
     cd /tmp
-    mkdir -p ./singbox
-    tar -xzf "${FILENAME}" -C /tmp/singbox --strip-components=1
-
-    cd ./singbox
     if [ -f "sing-box" ]; then
         chmod +x sing-box
         mv sing-box "$SING_BOX_BIN"
