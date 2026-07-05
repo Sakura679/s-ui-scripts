@@ -291,14 +291,18 @@ show_menu() {
     clear
     echo "╔════════════════════════════════════════╗"
     echo "║       Sing-box 节点管理面板 (S-UI)     ║"
+    echo "║          v1.0 - 改进版                ║"
     echo "╚════════════════════════════════════════╝"
     echo ""
     echo "1. 查看配置"
     echo "2. 添加节点"
     echo "3. 删除节点"
-    echo "4. 启动/停止/重启服务"
-    echo "5. 查看日志"
-    echo "6. 卸载 sing-box"
+    echo "4. 编辑节点"
+    echo "5. 启动/停止/重启服务"
+    echo "6. 查看日志"
+    echo "7. 验证配置"
+    echo "8. 导出节点配置"
+    echo "9. 卸载 sing-box"
     echo "0. 退出"
     echo ""
 }
@@ -346,6 +350,58 @@ add_node_menu() {
     esac
 }
 
+# 生成随机 UUID
+generate_uuid() {
+    python3 << 'EOFPYTHON'
+import uuid
+print(str(uuid.uuid4()))
+EOFPYTHON
+}
+
+# 生成随机密码 (Base64 编码)
+generate_password() {
+    python3 << 'EOFPYTHON'
+import base64
+import os
+password = base64.b64encode(os.urandom(32)).decode('utf-8')
+print(password)
+EOFPYTHON
+}
+
+# 生成 Reality 公钥和私钥
+generate_reality_keys() {
+    python3 << 'EOFPYTHON'
+import subprocess
+import json
+import os
+
+try:
+    # 使用 sing-box 生成 reality 密钥对
+    result = subprocess.run(['/usr/local/bin/sing-box', 'generate', 'reality-keypair'], 
+                          capture_output=True, text=True)
+    if result.returncode == 0:
+        output = json.loads(result.stdout)
+        print(f"{output['private_key']}|{output['public_key']}")
+    else:
+        # 备用方案：生成随机密钥
+        import base64
+        private_key = base64.b64encode(os.urandom(32)).decode('utf-8')
+        public_key = base64.b64encode(os.urandom(32)).decode('utf-8')
+        print(f"{private_key}|{public_key}")
+except Exception as e:
+    print(f"Error: {e}", file=__import__('sys').stderr)
+EOFPYTHON
+}
+
+# 生成随机 short_id
+generate_short_id() {
+    python3 << 'EOFPYTHON'
+import secrets
+short_id = secrets.token_hex(3)
+print(short_id)
+EOFPYTHON
+}
+
 add_ss_node() {
     clear
     echo "╔════════════════════════════════════════╗"
@@ -354,14 +410,40 @@ add_ss_node() {
     echo ""
     
     read -p "请输入节点标签 (tag): " ss_tag
-    read -p "请输入监听地址 (0.0.0.0): " ss_listen
+    read -p "请输入监听地址 (默认 0.0.0.0): " ss_listen
     ss_listen=${ss_listen:-0.0.0.0}
     read -p "请输入监听端口: " ss_port
-    read -p "请输入加密方式 (aes-128-gcm/aes-256-gcm/chacha20-poly1305): " ss_cipher
-    ss_cipher=${ss_cipher:-aes-256-gcm}
-    read -p "请输入密码: " ss_password
     
-    # 生成 inbound 配置
+    echo ""
+    echo "加密方式选项:"
+    echo "  1. aes-128-gcm"
+    echo "  2. aes-256-gcm (推荐)"
+    echo "  3. chacha20-poly1305"
+    read -p "请选择加密方式 (1-3, 默认 2): " cipher_choice
+    
+    case $cipher_choice in
+        1) ss_cipher="aes-128-gcm" ;;
+        3) ss_cipher="chacha20-poly1305" ;;
+        *) ss_cipher="aes-256-gcm" ;;
+    esac
+    
+    echo ""
+    echo "是否使用混淆插件? (y/n)"
+    read -p "选择 (默认 n): " use_plugin
+    
+    local plugin_config=""
+    if [ "$use_plugin" = "y" ] || [ "$use_plugin" = "Y" ]; then
+        read -p "请输入混淆域名 (如: gw.alicdn.com): " plugin_opts
+        plugin_config=$(cat <<EOFPLUGIN
+  "plugin": "obfs-local",
+  "plugin_opts": "$plugin_opts",
+EOFPLUGIN
+)
+    fi
+    
+    # 自动生成密码
+    ss_password=$(generate_password)
+    
     local ss_config=$(cat <<EOF
 {
   "type": "shadowsocks",
@@ -370,19 +452,31 @@ add_ss_node() {
   "listen_port": $ss_port,
   "method": "$ss_cipher",
   "password": "$ss_password"
+  $plugin_config
 }
 EOF
 )
     
-    # 添加到配置文件
     add_inbound_to_config "$ss_config"
     
     echo ""
     print_success "Shadowsocks 节点添加成功"
-    echo "节点信息:"
+    echo "╔════════════════════════════════════════╗"
+    echo "║         节点信息                       ║"
+    echo "╚════════════════════════════════════════╝"
     echo "  标签: $ss_tag"
     echo "  地址: $ss_listen:$ss_port"
     echo "  加密: $ss_cipher"
+    echo "  密码: $ss_password"
+    if [ -n "$plugin_opts" ]; then
+        echo "  混淆: $plugin_opts"
+    fi
+    echo ""
+    echo "客户端配置:"
+    echo "  \"server\": \"$ss_listen\","
+    echo "  \"server_port\": $ss_port,"
+    echo "  \"method\": \"$ss_cipher\","
+    echo "  \"password\": \"$ss_password\""
     echo ""
     read -p "按 Enter 返回菜单..."
 }
@@ -395,23 +489,113 @@ add_vless_node() {
     echo ""
     
     read -p "请输入节点标签 (tag): " vless_tag
-    read -p "请输入监听地址 (0.0.0.0): " vless_listen
+    read -p "请输入监听地址 (默认 0.0.0.0): " vless_listen
     vless_listen=${vless_listen:-0.0.0.0}
     read -p "请输入监听端口: " vless_port
-    read -p "请输入 UUID: " vless_uuid
-    read -p "是否启用 TLS? (y/n): " use_tls
+    
+    # 自动生成 UUID
+    vless_uuid=$(generate_uuid)
+    
+    echo ""
+    echo "传输协议选项:"
+    echo "  1. TCP (默认)"
+    echo "  2. WS (WebSocket)"
+    echo "  3. gRPC"
+    read -p "请选择传输协议 (1-3, 默认 1): " transport_choice
+    
+    case $transport_choice in
+        2) transport_type="ws" ;;
+        3) transport_type="grpc" ;;
+        *) transport_type="tcp" ;;
+    esac
+    
+    echo ""
+    echo "是否启用 TLS? (y/n)"
+    read -p "选择 (默认 y): " use_tls
+    use_tls=${use_tls:-y}
     
     local tls_config=""
+    local flow_config=""
+    
     if [ "$use_tls" = "y" ] || [ "$use_tls" = "Y" ]; then
-        read -p "请输入 TLS 证书路径: " cert_path
-        read -p "请输入 TLS 密钥路径: " key_path
-        tls_config=$(cat <<EOFTLS
+        echo ""
+        echo "TLS 模式选项:"
+        echo "  1. 标准 TLS"
+        echo "  2. Reality (推荐)"
+        read -p "请选择 TLS 模式 (1-2, 默认 1): " tls_mode
+        
+        if [ "$tls_mode" = "2" ]; then
+            # Reality 模式
+            read -p "请输入 SNI (如: gw.alicdn.com): " reality_sni
+            
+            echo "正在生成 Reality 密钥对..."
+            reality_keys=$(generate_reality_keys)
+            reality_private_key=$(echo $reality_keys | cut -d'|' -f1)
+            reality_public_key=$(echo $reality_keys | cut -d'|' -f2)
+            
+            reality_short_id=$(generate_short_id)
+            
+            tls_config=$(cat <<EOFTLS
     "tls": {
       "enabled": true,
+      "server_name": "$reality_sni",
+      "reality": {
+        "enabled": true,
+        "private_key": "$reality_private_key",
+        "short_id": "$reality_short_id"
+      },
+      "utls": {
+        "enabled": true,
+        "fingerprint": "chrome"
+      }
+    },
+EOFTLS
+)
+            
+            flow_config=$(cat <<EOFFLOW
+  "flow": "xtls-rprx-vision",
+EOFFLOW
+)
+            
+        else
+            # 标准 TLS 模式
+            read -p "请输入 SNI (如: example.com): " tls_sni
+            read -p "请输入证书路径 (如: /etc/sing-box/cert.pem): " cert_path
+            read -p "请输入密钥路径 (如: /etc/sing-box/key.pem): " key_path
+            
+            tls_config=$(cat <<EOFTLS
+    "tls": {
+      "enabled": true,
+      "server_name": "$tls_sni",
       "certificate_path": "$cert_path",
       "key_path": "$key_path"
     },
 EOFTLS
+)
+        fi
+    fi
+    
+    # 构建传输配置
+    local transport_config=""
+    if [ "$transport_type" = "ws" ]; then
+        read -p "请输入 WebSocket 路径 (默认 /): " ws_path
+        ws_path=${ws_path:-/}
+        transport_config=$(cat <<EOFWS
+  "transport": {
+    "type": "ws",
+    "path": "$ws_path"
+  },
+EOFWS
+)
+    elif [ "$transport_type" = "grpc" ]; then
+        read -p "请输入 gRPC 服务名 (默认 grpc): " grpc_service
+        grpc_service=${grpc_service:-grpc}
+        transport_config=$(cat <<EOFGRPC
+  "transport": {
+    "type": "grpc",
+    "service_name": "$grpc_service"
+  },
+EOFGRPC
 )
     fi
     
@@ -426,7 +610,9 @@ EOFTLS
       "uuid": "$vless_uuid"
     }
   ]
+  $transport_config
   $tls_config
+  $flow_config
 }
 EOF
 )
@@ -435,10 +621,42 @@ EOF
     
     echo ""
     print_success "VLESS 节点添加成功"
-    echo "节点信息:"
+    echo "╔════════════════════════════════════════╗"
+    echo "║         节点信息                       ║"
+    echo "╚════════════════════════════════════════╝"
     echo "  标签: $vless_tag"
     echo "  地址: $vless_listen:$vless_port"
     echo "  UUID: $vless_uuid"
+    echo "  传输: $transport_type"
+    if [ -n "$tls_config" ]; then
+        echo "  TLS: 已启用"
+        if [ "$tls_mode" = "2" ]; then
+            echo "  模式: Reality"
+            echo "  SNI: $reality_sni"
+            echo "  公钥: $reality_public_key"
+            echo "  Short ID: $reality_short_id"
+        else
+            echo "  模式: 标准 TLS"
+            echo "  SNI: $tls_sni"
+        fi
+    fi
+    echo ""
+    echo "客户端配置:"
+    echo "  \"server\": \"$vless_listen\","
+    echo "  \"server_port\": $vless_port,"
+    echo "  \"uuid\": \"$vless_uuid\","
+    if [ "$tls_mode" = "2" ]; then
+        echo "  \"tls\": {"
+        echo "    \"enabled\": true,"
+        echo "    \"server_name\": \"$reality_sni\","
+        echo "    \"reality\": {"
+        echo "      \"enabled\": true,"
+        echo "      \"public_key\": \"$reality_public_key\","
+        echo "      \"short_id\": \"$reality_short_id\""
+        echo "    }"
+        echo "  },"
+        echo "  \"flow\": \"xtls-rprx-vision\""
+    fi
     echo ""
     read -p "按 Enter 返回菜单..."
 }
@@ -451,12 +669,63 @@ add_hy2_node() {
     echo ""
     
     read -p "请输入节点标签 (tag): " hy2_tag
-    read -p "请输入监听地址 (0.0.0.0): " hy2_listen
+    read -p "请输入监听地址 (默认 0.0.0.0): " hy2_listen
     hy2_listen=${hy2_listen:-0.0.0.0}
     read -p "请输入监听端口: " hy2_port
-    read -p "请输入密码: " hy2_password
-    read -p "请输入 TLS 证书路径: " hy2_cert
-    read -p "请输入 TLS 密钥路径: " hy2_key
+    
+    # 自动生成密码
+    hy2_password=$(generate_password)
+    
+    echo ""
+    echo "是否启用 TLS? (y/n)"
+    read -p "选择 (默认 y): " use_tls
+    use_tls=${use_tls:-y}
+    
+    local tls_config=""
+    
+    if [ "$use_tls" = "y" ] || [ "$use_tls" = "Y" ]; then
+        read -p "请输入 SNI (如: bing.com): " hy2_sni
+        read -p "请输入证书路径 (如: /etc/sing-box/cert.pem): " hy2_cert
+        read -p "请输入密钥路径 (如: /etc/sing-box/key.pem): " hy2_key
+        
+        echo ""
+        echo "是否忽略证书验证? (y/n)"
+        read -p "选择 (默认 n): " insecure
+        
+        if [ "$insecure" = "y" ] || [ "$insecure" = "Y" ]; then
+            insecure_flag="true"
+        else
+            insecure_flag="false"
+        fi
+        
+        tls_config=$(cat <<EOFTLS
+  "tls": {
+    "enabled": true,
+    "server_name": "$hy2_sni",
+    "certificate_path": "$hy2_cert",
+    "key_path": "$hy2_key",
+    "insecure": $insecure_flag
+  },
+EOFTLS
+)
+    fi
+    
+    # 可选：上行/下行速率限制
+    echo ""
+    echo "是否设置速率限制? (y/n)"
+    read -p "选择 (默认 n): " set_rate_limit
+    
+    local rate_config=""
+    if [ "$set_rate_limit" = "y" ] || [ "$set_rate_limit" = "Y" ]; then
+        read -p "请输入上行速率 (Mbps, 如: 100): " up_mbps
+        read -p "请输入下行速率 (Mbps, 如: 100): " down_mbps
+        
+        rate_config=$(cat <<EOFRATE
+  "up_mbps": $up_mbps,
+  "down_mbps": $down_mbps,
+EOFRATE
+)
+    fi
     
     local hy2_config=$(cat <<EOF
 {
@@ -468,12 +737,9 @@ add_hy2_node() {
     {
       "password": "$hy2_password"
     }
-  ],
-  "tls": {
-    "enabled": true,
-    "certificate_path": "$hy2_cert",
-    "key_path": "$hy2_key"
-  }
+  ]
+  $rate_config
+  $tls_config
 }
 EOF
 )
@@ -482,9 +748,31 @@ EOF
     
     echo ""
     print_success "Hysteria2 节点添加成功"
-    echo "节点信息:"
+    echo "╔════════════════════════════════════════╗"
+    echo "║         节点信息                       ║"
+    echo "╚════════════════════════════════════════╝"
     echo "  标签: $hy2_tag"
     echo "  地址: $hy2_listen:$hy2_port"
+    echo "  密码: $hy2_password"
+    if [ -n "$tls_config" ]; then
+        echo "  TLS: 已启用"
+        echo "  SNI: $hy2_sni"
+        echo "  证书验证: $insecure_flag"
+    fi
+    if [ -n "$rate_config" ]; then
+        echo "  上行: ${up_mbps}Mbps"
+        echo "  下行: ${down_mbps}Mbps"
+    fi
+    echo ""
+    echo "客户端配置:"
+    echo "  \"server\": \"$hy2_listen\","
+    echo "  \"server_port\": $hy2_port,"
+    echo "  \"password\": \"$hy2_password\","
+    echo "  \"tls\": {"
+    echo "    \"enabled\": true,"
+    echo "    \"server_name\": \"$hy2_sni\","
+    echo "    \"insecure\": $insecure_flag"
+    echo "  }"
     echo ""
     read -p "按 Enter 返回菜单..."
 }
@@ -497,12 +785,30 @@ add_trojan_node() {
     echo ""
     
     read -p "请输入节点标签 (tag): " trojan_tag
-    read -p "请输入监听地址 (0.0.0.0): " trojan_listen
+    read -p "请输入监听地址 (默认 0.0.0.0): " trojan_listen
     trojan_listen=${trojan_listen:-0.0.0.0}
     read -p "请输入监听端口: " trojan_port
-    read -p "请输入密码: " trojan_password
-    read -p "请输入 TLS 证书路径: " trojan_cert
-    read -p "请输入 TLS 密钥路径: " trojan_key
+    
+    # 自动生成密码
+    trojan_password=$(generate_password)
+    
+    echo ""
+    read -p "请输入 SNI (如: example.com): " trojan_sni
+    read -p "请输入证书路径 (如: /etc/sing-box/cert.pem): " trojan_cert
+    read -p "请输入密钥路径 (如: /etc/sing-box/key.pem): " trojan_key
+    
+    echo ""
+    echo "是否启用 ALPN? (y/n)"
+    read -p "选择 (默认 y): " use_alpn
+    use_alpn=${use_alpn:-y}
+    
+    local alpn_config=""
+    if [ "$use_alpn" = "y" ] || [ "$use_alpn" = "Y" ]; then
+        alpn_config=$(cat <<EOFALPN
+    "alpn": ["h2", "http/1.1"],
+EOFALPN
+)
+    fi
     
     local trojan_config=$(cat <<EOF
 {
@@ -517,8 +823,10 @@ add_trojan_node() {
   ],
   "tls": {
     "enabled": true,
+    "server_name": "$trojan_sni",
     "certificate_path": "$trojan_cert",
     "key_path": "$trojan_key"
+    $alpn_config
   }
 }
 EOF
@@ -528,9 +836,25 @@ EOF
     
     echo ""
     print_success "Trojan 节点添加成功"
-    echo "节点信息:"
+    echo "╔════════════════════════════════════════╗"
+    echo "║         节点信息                       ║"
+    echo "╚════════════════════════════════════════╝"
     echo "  标签: $trojan_tag"
     echo "  地址: $trojan_listen:$trojan_port"
+    echo "  密码: $trojan_password"
+    echo "  SNI: $trojan_sni"
+    if [ "$use_alpn" = "y" ] || [ "$use_alpn" = "Y" ]; then
+        echo "  ALPN: h2, http/1.1"
+    fi
+    echo ""
+    echo "客户端配置:"
+    echo "  \"server\": \"$trojan_listen\","
+    echo "  \"server_port\": $trojan_port,"
+    echo "  \"password\": \"$trojan_password\","
+    echo "  \"tls\": {"
+    echo "    \"enabled\": true,"
+    echo "    \"server_name\": \"$trojan_sni\""
+    echo "  }"
     echo ""
     read -p "按 Enter 返回菜单..."
 }
@@ -543,12 +867,116 @@ add_vmess_node() {
     echo ""
     
     read -p "请输入节点标签 (tag): " vmess_tag
-    read -p "请输入监听地址 (0.0.0.0): " vmess_listen
+    read -p "请输入监听地址 (默认 0.0.0.0): " vmess_listen
     vmess_listen=${vmess_listen:-0.0.0.0}
     read -p "请输入监听端口: " vmess_port
-    read -p "请输入 UUID: " vmess_uuid
-    read -p "请输入加密方式 (auto/aes-128-gcm/chacha20-poly1305): " vmess_cipher
-    vmess_cipher=${vmess_cipher:-auto}
+    
+    # 自动生成 UUID
+    vmess_uuid=$(generate_uuid)
+    
+    echo ""
+    echo "加密方式选项:"
+    echo "  1. auto (推荐)"
+    echo "  2. aes-128-gcm"
+    echo "  3. chacha20-poly1305"
+    echo "  4. none"
+    read -p "请选择加密方式 (1-4, 默认 1): " cipher_choice
+    
+    case $cipher_choice in
+        2) vmess_cipher="aes-128-gcm" ;;
+        3) vmess_cipher="chacha20-poly1305" ;;
+        4) vmess_cipher="none" ;;
+        *) vmess_cipher="auto" ;;
+    esac
+    
+    echo ""
+    echo "传输协议选项:"
+    echo "  1. TCP (默认)"
+    echo "  2. WS (WebSocket)"
+    echo "  3. HTTP"
+    echo "  4. gRPC"
+    read -p "请选择传输协议 (1-4, 默认 1): " transport_choice
+    
+    local transport_config=""
+    
+    case $transport_choice in
+        2)
+            transport_type="ws"
+            read -p "请输入 WebSocket 路径 (默认 /): " ws_path
+            ws_path=${ws_path:-/}
+            read -p "请输入 WebSocket 主机 (可选): " ws_host
+            
+            transport_config=$(cat <<EOFWS
+  "transport": {
+    "type": "ws",
+    "path": "$ws_path"
+EOFWS
+)
+            if [ -n "$ws_host" ]; then
+                transport_config="$transport_config,
+    \"host\": \"$ws_host\""
+            fi
+            transport_config="$transport_config
+  },"
+            ;;
+        3)
+            transport_type="http"
+            read -p "请输入 HTTP 路径 (默认 /): " http_path
+            http_path=${http_path:-/}
+            read -p "请输入 HTTP 主机 (可选): " http_host
+            
+            transport_config=$(cat <<EOFHTTP
+  "transport": {
+    "type": "http",
+    "path": "$http_path"
+EOFHTTP
+)
+            if [ -n "$http_host" ]; then
+                transport_config="$transport_config,
+    \"host\": \"$http_host\""
+            fi
+            transport_config="$transport_config
+  },"
+            ;;
+        4)
+            transport_type="grpc"
+            read -p "请输入 gRPC 服务名 (默认 grpc): " grpc_service
+            grpc_service=${grpc_service:-grpc}
+            
+            transport_config=$(cat <<EOFGRPC
+  "transport": {
+    "type": "grpc",
+    "service_name": "$grpc_service"
+  },
+EOFGRPC
+)
+            ;;
+        *)
+            transport_type="tcp"
+            ;;
+    esac
+    
+    echo ""
+    echo "是否启用 TLS? (y/n)"
+    read -p "选择 (默认 n): " use_tls
+    
+    local tls_config=""
+    
+    if [ "$use_tls" = "y" ] || [ "$use_tls" = "Y" ]; then
+        read -p "请输入 SNI (如: example.com): " vmess_sni
+        read -p "请输入证书路径 (如: /etc/sing-box/cert.pem): " vmess_cert
+        read -p "请输入密钥路径 (如: /etc/sing-box/key.pem): " vmess_key
+        
+        tls_config=$(cat <<EOFTLS
+  "tls": {
+    "enabled": true,
+    "server_name": "$vmess_sni",
+    "certificate_path": "$vmess_cert",
+    "key_path": "$vmess_key"
+  },
+EOFTLS
+)
+    fi
     
     local vmess_config=$(cat <<EOF
 {
@@ -562,6 +990,8 @@ add_vmess_node() {
       "security": "$vmess_cipher"
     }
   ]
+  $transport_config
+  $tls_config
 }
 EOF
 )
@@ -570,10 +1000,24 @@ EOF
     
     echo ""
     print_success "VMess 节点添加成功"
-    echo "节点信息:"
+    echo "╔════════════════════════════════════════╗"
+    echo "║         节点信息                       ║"
+    echo "╚════════════════════════════════════════╝"
     echo "  标签: $vmess_tag"
     echo "  地址: $vmess_listen:$vmess_port"
     echo "  UUID: $vmess_uuid"
+    echo "  加密: $vmess_cipher"
+    echo "  传输: $transport_type"
+    if [ -n "$tls_config" ]; then
+        echo "  TLS: 已启用"
+        echo "  SNI: $vmess_sni"
+    fi
+    echo ""
+    echo "客户端配置:"
+    echo "  \"server\": \"$vmess_listen\","
+    echo "  \"server_port\": $vmess_port,"
+    echo "  \"uuid\": \"$vmess_uuid\","
+    echo "  \"security\": \"$vmess_cipher\""
     echo ""
     read -p "按 Enter 返回菜单..."
 }
@@ -617,11 +1061,12 @@ delete_node() {
     echo ""
     
     # 列出所有节点
-    python3 << EOFPYTHON
+    python3 << 'EOFPYTHON'
 import json
+import sys
 
 try:
-    with open('$SING_BOX_CONFIG_DIR/config.json', 'r') as f:
+    with open('/etc/sing-box/config.json', 'r') as f:
         config = json.load(f)
     
     inbounds = config.get('inbounds', [])
@@ -654,7 +1099,7 @@ import sys
 try:
     node_index = $node_index - 1
     
-    with open('$SING_BOX_CONFIG_DIR/config.json', 'r') as f:
+    with open('/etc/sing-box/config.json', 'r') as f:
         config = json.load(f)
     
     inbounds = config.get('inbounds', [])
@@ -662,11 +1107,11 @@ try:
     if 0 <= node_index < len(inbounds):
         deleted = inbounds.pop(node_index)
         
-        with open('$SING_BOX_CONFIG_DIR/config.json', 'w') as f:
+        with open('/etc/sing-box/config.json', 'w') as f:
             json.dump(config, f, indent=2, ensure_ascii=False)
         
         print(f"已删除节点: {deleted.get('tag', '未命名')}")
-    else:
+    else
         print("无效的节点序号")
         sys.exit(1)
 except Exception as e:
@@ -678,41 +1123,192 @@ EOFPYTHON
     read -p "按 Enter 返回菜单..."
 }
 
+edit_node() {
+    clear
+    echo "╔════════════════════════════════════════╗"
+    echo "║         编辑节点                       ║"
+    echo "╚════════════════════════════════════════╝"
+    echo ""
+    
+    # 列出所有节点
+    python3 << 'EOFPYTHON'
+import json
+
+try:
+    with open('/etc/sing-box/config.json', 'r') as f:
+        config = json.load(f)
+    
+    inbounds = config.get('inbounds', [])
+    
+    if not inbounds:
+        print("没有配置的节点")
+    else:
+        print("当前节点列表:")
+        print("")
+        for i, inbound in enumerate(inbounds, 1):
+            tag = inbound.get('tag', '未命名')
+            node_type = inbound.get('type', '未知')
+            port = inbound.get('listen_port', 'N/A')
+            print(f"{i}. [{node_type}] {tag} (端口: {port})")
+        print("")
+except Exception as e:
+    print(f"错误: {e}")
+EOFPYTHON
+    
+    read -p "请输入要编辑的节点序号 (0 取消): " node_index
+    
+    if [ "$node_index" = "0" ]; then
+        return
+    fi
+    
+    python3 << EOFPYTHON
+import json
+import sys
+
+try:
+    node_index = $node_index - 1
+    
+    with open('/etc/sing-box/config.json', 'r') as f:
+        config = json.load(f)
+    
+    inbounds = config.get('inbounds', [])
+    
+    if 0 <= node_index < len(inbounds):
+        node = inbounds[node_index]
+        print(f"\n节点详情:")
+        print(json.dumps(node, indent=2, ensure_ascii=False))
+    else:
+        print("无效的节点序号")
+        sys.exit(1)
+except Exception as e:
+    print(f"错误: {e}", file=sys.stderr)
+    sys.exit(1)
+EOFPYTHON
+    
+    echo ""
+    echo "提示: 直接编辑配置文件可获得更好的编辑体验"
+    echo "配置文件路径: /etc/sing-box/config.json"
+    echo ""
+    read -p "是否用 nano 编辑器打开配置文件? (y/n): " edit_choice
+    
+    if [ "$edit_choice" = "y" ] || [ "$edit_choice" = "Y" ]; then
+        nano /etc/sing-box/config.json
+        
+        # 验证配置
+        echo ""
+        echo "正在验证配置..."
+        if /usr/local/bin/sing-box check -c /etc/sing-box/config.json > /dev/null 2>&1; then
+            print_success "配置验证成功"
+            
+            echo ""
+            read -p "是否重启服务以应用更改? (y/n): " restart_choice
+            if [ "$restart_choice" = "y" ] || [ "$restart_choice" = "Y" ]; then
+                systemctl restart sing-box
+                print_success "服务已重启"
+            fi
+        else
+            print_error "配置验证失败，请检查配置文件"
+        fi
+    fi
+    
+    echo ""
+    read -p "按 Enter 返回菜单..."
+}
+
 manage_service() {
     clear
     echo "╔════════════════════════════════════════╗"
-    echo "║      服务管理                          ║"
+    echo "║       Sing-box 服务管理                ║"
     echo "╚════════════════════════════════════════╝"
     echo ""
-    echo "1. 启动服务"
-    echo "2. 停止服务"
-    echo "3. 重启服务"
-    echo "4. 查看服务状态"
+    
+    # 检查服务状态
+    if systemctl is-active --quiet sing-box; then
+        echo "服务状态: ✓ 运行中"
+        echo ""
+        echo "1. 停止服务"
+        echo "2. 重启服务"
+        echo "3. 查看实时日志"
+        echo "0. 返回"
+        echo ""
+        read -p "请选择 (0-3): " service_choice
+        
+        case $service_choice in
+            1)
+                systemctl stop sing-box
+                print_success "服务已停止"
+                ;;
+            2)
+                systemctl restart sing-box
+                print_success "服务已重启"
+                ;;
+            3)
+                journalctl -u sing-box -f
+                ;;
+            0)
+                return
+                ;;
+            *)
+                echo "无效选择"
+                ;;
+        esac
+    else
+        echo "服务状态: ✗ 已停止"
+        echo ""
+        echo "1. 启动服务"
+        echo "2. 启用开机自启"
+        echo "0. 返回"
+        echo ""
+        read -p "请选择 (0-2): " service_choice
+        
+        case $service_choice in
+            1)
+                systemctl start sing-box
+                print_success "服务已启动"
+                ;;
+            2)
+                systemctl enable sing-box
+                print_success "已启用开机自启"
+                ;;
+            0)
+                return
+                ;;
+            *)
+                echo "无效选择"
+                ;;
+        esac
+    fi
+    
+    echo ""
+    read -p "按 Enter 返回菜单..."
+}
+
+view_logs() {
+    clear
+    echo "╔════════════════════════════════════════╗"
+    echo "║         Sing-box 日志查看              ║"
+    echo "╚════════════════════════════════════════╝"
+    echo ""
+    echo "1. 查看最近 50 行日志"
+    echo "2. 查看最近 100 行日志"
+    echo "3. 实时查看日志 (按 Ctrl+C 退出)"
+    echo "4. 查看错误日志"
     echo "0. 返回"
     echo ""
-    read -p "请选择 (0-4): " service_choice
+    read -p "请选择 (0-4): " log_choice
     
-    case $service_choice in
+    case $log_choice in
         1)
-            echo "正在启动 sing-box 服务..."
-            systemctl start sing-box
-            sleep 2
-            systemctl status sing-box --no-pager
+            journalctl -u sing-box -n 50
             ;;
         2)
-            echo "正在停止 sing-box 服务..."
-            systemctl stop sing-box
-            sleep 2
-            systemctl status sing-box --no-pager
+            journalctl -u sing-box -n 100
             ;;
         3)
-            echo "正在重启 sing-box 服务..."
-            systemctl restart sing-box
-            sleep 2
-            systemctl status sing-box --no-pager
+            journalctl -u sing-box -f
             ;;
         4)
-            systemctl status sing-box --no-pager
+            journalctl -u sing-box -p err
             ;;
         0)
             return
@@ -726,82 +1322,488 @@ manage_service() {
     read -p "按 Enter 返回菜单..."
 }
 
-view_logs() {
+validate_config() {
     clear
     echo "╔════════════════════════════════════════╗"
-    echo "║         查看日志                       ║"
+    echo "║         配置文件验证                   ║"
     echo "╚════════════════════════════════════════╝"
     echo ""
-    echo "最近 50 行日志:"
+    
+    if [ ! -f "$SING_BOX_CONFIG_DIR/config.json" ]; then
+        print_error "配置文件不存在"
+        echo ""
+        read -p "按 Enter 返回菜单..."
+        return
+    fi
+    
+    echo "正在验证配置文件..."
     echo ""
-    journalctl -u sing-box -n 50 --no-pager
+    
+    if /usr/local/bin/sing-box check -c "$SING_BOX_CONFIG_DIR/config.json" > /tmp/sing-box-check.log 2>&1; then
+        print_success "配置文件验证成功 ✓"
+        echo ""
+        echo "配置摘要:"
+        python3 << 'EOFPYTHON'
+import json
+
+try:
+    with open('/etc/sing-box/config.json', 'r') as f:
+        config = json.load(f)
+    
+    inbounds = config.get('inbounds', [])
+    outbounds = config.get('outbounds', [])
+    
+    print(f"入站节点数: {len(inbounds)}")
+    print(f"出站节点数: {len(outbounds)}")
+    print("")
+    print("入站节点:")
+    for inbound in inbounds:
+        tag = inbound.get('tag', '未命名')
+        node_type = inbound.get('type', '未知')
+        port = inbound.get('listen_port', 'N/A')
+        print(f"  - [{node_type}] {tag} (端口: {port})")
+    
+    print("")
+    print("出站节点:")
+    for outbound in outbounds:
+        tag = outbound.get('tag', '未命名')
+        node_type = outbound.get('type', '未知')
+        print(f"  - [{node_type}] {tag}")
+        
+except Exception as e:
+    print(f"错误: {e}")
+EOFPYTHON
+    else
+        print_error "配置文件验证失败 ✗"
+        echo ""
+        echo "错误信息:"
+        cat /tmp/sing-box-check.log
+    fi
+    
     echo ""
     read -p "按 Enter 返回菜单..."
 }
 
-uninstall_sing_box() {
+export_nodes() {
     clear
     echo "╔════════════════════════════════════════╗"
-    echo "║      卸载 Sing-box                     ║"
+    echo "║         导出节点配置                   ║"
     echo "╚════════════════════════════════════════╝"
     echo ""
-    read -p "确定要卸载 sing-box 吗? (y/n): " confirm
     
-    if [ "$confirm" != "y" ] && [ "$confirm" != "Y" ]; then
-        echo "已取消"
-        sleep 2
+    if [ ! -f "$SING_BOX_CONFIG_DIR/config.json" ]; then
+        print_error "配置文件不存在"
+        echo ""
+        read -p "按 Enter 返回菜单..."
         return
     fi
     
+    echo "导出格式选项:"
+    echo "1. JSON 格式 (完整配置)"
+    echo "2. 客户端配置 (仅节点信息)"
+    echo "3. 分享链接 (sing-box URI)"
+    echo "0. 返回"
+    echo ""
+    read -p "请选择 (0-3): " export_choice
+    
+    case $export_choice in
+        1)
+            export_json_config
+            ;;
+        2)
+            export_client_config
+            ;;
+        3)
+            export_share_links
+            ;;
+        0)
+            return
+            ;;
+        *)
+            echo "无效选择"
+            ;;
+    esac
+    
+    echo ""
+    read -p "按 Enter 返回菜单..."
+}
+
+export_json_config() {
+    echo ""
+    echo "正在导出 JSON 配置..."
+    
+    local export_file="/tmp/sing-box-config-$(date +%Y%m%d-%H%M%S).json"
+    
+    cp "$SING_BOX_CONFIG_DIR/config.json" "$export_file"
+    
+    print_success "配置已导出到: $export_file"
+    echo ""
+    echo "您可以使用以下命令下载:"
+    echo "  scp root@<服务器IP>:$export_file ."
+}
+
+export_client_config() {
+    echo ""
+    echo "正在生成客户端配置..."
+    
+    python3 << 'EOFPYTHON'
+import json
+from datetime import datetime
+
+try:
+    with open('/etc/sing-box/config.json', 'r') as f:
+        config = json.load(f)
+    
+    inbounds = config.get('inbounds', [])
+    
+    client_config = {
+        "version": 1,
+        "export_time": datetime.now().isoformat(),
+        "nodes": []
+    }
+    
+    for inbound in inbounds:
+        node = {
+            "tag": inbound.get('tag', '未命名'),
+            "type": inbound.get('type', '未知'),
+            "server": inbound.get('listen', '0.0.0.0'),
+            "server_port": inbound.get('listen_port', 0)
+        }
+        
+        # 根据节点类型添加特定信息
+        node_type = inbound.get('type', '')
+        
+        if node_type == 'shadowsocks':
+            users = inbound.get('users', [{}])
+            if users:
+                node['method'] = inbound.get('method', 'aes-256-gcm')
+                node['password'] = users[0].get('password', '')
+                
+        elif node_type == 'vless':
+            users = inbound.get('users', [{}])
+            if users:
+                node['uuid'] = users[0].get('uuid', '')
+            node['transport'] = inbound.get('transport', {}).get('type', 'tcp')
+            
+            tls = inbound.get('tls', {})
+            if tls.get('enabled'):
+                node['tls'] = {
+                    'enabled': True,
+                    'server_name': tls.get('server_name', '')
+                }
+                if tls.get('reality'):
+                    node['tls']['reality'] = {
+                        'enabled': True,
+                        'public_key': tls['reality'].get('public_key', ''),
+                        'short_id': tls['reality'].get('short_id', '')
+                    }
+        
+        elif node_type == 'hysteria2':
+            users = inbound.get('users', [{}])
+            if users:
+                node['password'] = users[0].get('password', '')
+            
+            tls = inbound.get('tls', {})
+            if tls.get('enabled'):
+                node['tls'] = {
+                    'enabled': True,
+                    'server_name': tls.get('server_name', '')
+                }
+        
+        elif node_type == 'trojan':
+            users = inbound.get('users', [{}])
+            if users:
+                node['password'] = users[0].get('password', '')
+            
+            tls = inbound.get('tls', {})
+            if tls.get('enabled'):
+                node['tls'] = {
+                    'enabled': True,
+                    'server_name': tls.get('server_name', '')
+                }
+        
+        elif node_type == 'vmess':
+            users = inbound.get('users', [{}])
+            if users:
+                node['uuid'] = users[0].get('uuid', '')
+                node['security'] = users[0].get('security', 'auto')
+            node['transport'] = inbound.get('transport', {}).get('type', 'tcp')
+        
+        client_config['nodes'].append(node)
+    
+    export_file = f"/tmp/sing-box-client-config-{datetime.now().strftime('%Y%m%d-%H%M%S')}.json"
+    with open(export_file, 'w') as f:
+        json.dump(client_config, f, indent=2, ensure_ascii=False)
+    
+    print(f"客户端配置已导出到: {export_file}")
+    print("")
+    print("配置内容:")
+    print(json.dumps(client_config, indent=2, ensure_ascii=False))
+    
+except Exception as e:
+    print(f"错误: {e}")
+EOFPYTHON
+}
+
+export_share_links() {
+    echo ""
+    echo "正在生成分享链接..."
+    echo ""
+    
+    python3 << 'EOFPYTHON'
+import json
+import base64
+import urllib.parse
+
+try:
+    with open('/etc/sing-box/config.json', 'r') as f:
+        config = json.load(f)
+    
+    inbounds = config.get('inbounds', [])
+    
+    print("分享链接:")
+    print("")
+    
+    for inbound in inbounds:
+        node_type = inbound.get('type', '')
+        tag = inbound.get('tag', '未命名')
+        server = inbound.get('listen', '0.0.0.0')
+        port = inbound.get('listen_port', 0)
+        
+        if node_type == 'shadowsocks':
+            users = inbound.get('users', [{}])
+            if users:
+                method = inbound.get('method', 'aes-256-gcm')
+                password = users[0].get('password', '')
+                
+                # SS URI 格式: ss://method:password@server:port#tag
+                userinfo = f"{method}:{password}"
+                userinfo_b64 = base64.b64encode(userinfo.encode()).decode()
+                uri = f"ss://{userinfo_b64}@{server}:{port}#{urllib.parse.quote(tag)}"
+                print(f"[SS] {tag}")
+                print(f"  {uri}")
+                print("")
+        
+        elif node_type == 'vless':
+            users = inbound.get('users', [{}])
+            if users:
+                uuid = users[0].get('uuid', '')
+                transport = inbound.get('transport', {}).get('type', 'tcp')
+                tls = inbound.get('tls', {})
+                
+                # VLESS URI 格式
+                uri = f"vless://{uuid}@{server}:{port}"
+                params = {
+                    'type': transport,
+                    'encryption': 'none'
+                }
+                
+                if tls.get('enabled'):
+                    params['security'] = 'tls'
+                    params['sni'] = tls.get('server_name', '')
+                    
+                    if tls.get('reality'):
+                        params['reality'] = '1'
+                        params['pbk'] = tls['reality'].get('public_key', '')
+                        params['sid'] = tls['reality'].get('short_id', '')
+                
+                query_string = '&'.join([f"{k}={v}" for k, v in params.items()])
+                uri = f"{uri}?{query_string}#{urllib.parse.quote(tag)}"
+                
+                print(f"[VLESS] {tag}")
+                print(f"  {uri}")
+                print("")
+        
+        elif node_type == 'hysteria2':
+            users = inbound.get('users', [{}])
+            if users:
+                password = users[0].get('password', '')
+                
+                # Hysteria2 URI 格式
+                uri = f"hy2://{password}@{server}:{port}"
+                params = {}
+                
+                tls = inbound.get('tls', {})
+                if tls.get('enabled'):
+                    params['sni'] = tls.get('server_name', '')
+                
+                if params:
+                    query_string = '&'.join([f"{k}={v}" for k, v in params.items()])
+                    uri = f"{uri}?{query_string}"
+                
+                uri = f"{uri}#{urllib.parse.quote(tag)}"
+                
+                print(f"[Hysteria2] {tag}")
+                print(f"  {uri}")
+                print("")
+        
+        elif node_type == 'trojan':
+            users = inbound.get('users', [{}])
+            if users:
+                password = users[0].get('password', '')
+                
+                # Trojan URI 格式
+                uri = f"trojan://{password}@{server}:{port}"
+                params = {}
+                
+                tls = inbound.get('tls', {})
+                if tls.get('enabled'):
+                    params['sni'] = tls.get('server_name', '')
+                
+                if params:
+                    query_string = '&'.join([f"{k}={v}" for k, v in params.items()])
+                    uri = f"{uri}?{query_string}"
+                
+                uri = f"{uri}#{urllib.parse.quote(tag)}"
+                
+                print(f"[Trojan] {tag}")
+                print(f"  {uri}")
+                print("")
+        
+        elif node_type == 'vmess':
+            users = inbound.get('users', [{}])
+            if users:
+                uuid = users[0].get('uuid', '')
+                security = users[0].get('security', 'auto')
+                transport = inbound.get('transport', {}).get('type', 'tcp')
+                
+                # VMess URI 格式 (base64 编码的 JSON)
+                vmess_config = {
+                    "v": "2",
+                    "ps": tag,
+                    "add": server,
+                    "port": port,
+                    "id": uuid,
+                    "aid": 0,
+                    "scy": security,
+                    "net": transport,
+                    "type": "none"
+                }
+                
+                vmess_json = json.dumps(vmess_config, separators=(',', ':'))
+                vmess_b64 = base64.b64encode(vmess_json.encode()).decode()
+                uri = f"vmess://{vmess_b64}"
+                
+                print(f"[VMess] {tag}")
+                print(f"  {uri}")
+                print("")
+
+except Exception as e:
+    print(f"错误: {e}")
+EOFPYTHON
+}
+
+uninstall_singbox() {
+    clear
+    echo "╔════════════════════════════════════════╗"
+    echo "║       卸载 Sing-box                    ║"
+    echo "╚════════════════════════════════════════╝"
+    echo ""
+    echo "警告: 此操作将卸载 Sing-box 并删除所有配置"
+    echo ""
+    read -p "确认卸载? (输入 'yes' 确认): " confirm
+    
+    if [ "$confirm" != "yes" ]; then
+        echo "已取消卸载"
+        echo ""
+        read -p "按 Enter 返回菜单..."
+        return
+    fi
+    
+    echo ""
     echo "正在卸载..."
     
     # 停止服务
-    systemctl stop sing-box 2>/dev/null || true
-    systemctl disable sing-box 2>/dev/null || true
+    systemctl stop sing-box 2>/dev/null
+    systemctl disable sing-box 2>/dev/null
     
-    # 删除文件
-    rm -f "$SING_BOX_BIN"
-    rm -f "$SING_BOX_SERVICE"
-    rm -rf "$SING_BOX_CONFIG_DIR"
-    rm -rf "$SING_BOX_LOG_DIR"
+    # 删除二进制文件
+    rm -f /usr/local/bin/sing-box
     
+    # 删除 systemd 服务文件
+    rm -f /etc/systemd/system/sing-box.service
     systemctl daemon-reload
     
-    echo "卸载完成"
-    sleep 2
+    # 删除配置目录
+    read -p "是否删除配置文件? (y/n): " delete_config
+    if [ "$delete_config" = "y" ] || [ "$delete_config" = "Y" ]; then
+        rm -rf /etc/sing-box
+    fi
+    
+    print_success "Sing-box 已卸载"
+    echo ""
+    read -p "按 Enter 返回菜单..."
 }
 
 # 主循环
 main() {
     while true; do
         show_menu
-        read -p "请选择 (0-6): " choice
+        read -p "请选择 (0-9): " choice
         
         case $choice in
-            1) view_config ;;
-            2) add_node_menu ;;
-            3) delete_node ;;
-            4) manage_service ;;
-            5) view_logs ;;
-            6) uninstall_sing_box ;;
-            0) 
-                echo "退出"
+            1)
+                view_config
+                ;;
+            2)
+                add_node_menu
+                ;;
+            3)
+                delete_node
+                ;;
+            4)
+                edit_node
+                ;;
+            5)
+                manage_service
+                ;;
+            6)
+                view_logs
+                ;;
+            7)
+                validate_config
+                ;;
+            8)
+                export_nodes
+                ;;
+            9)
+                uninstall_singbox
+                ;;
+            0)
+                clear
+                echo "感谢使用 Sing-box 管理面板"
+                echo "再见！"
                 exit 0
                 ;;
             *)
-                echo "无效选择"
+                echo "无效选择，请重试"
                 sleep 2
                 ;;
         esac
     done
 }
 
-# 检查是否以 root 运行
+# 检查是否以 root 身份运行
 if [ "$EUID" -ne 0 ]; then
-    echo "此脚本需要 root 权限运行"
+    print_error "此脚本必须以 root 身份运行"
+    echo "请使用: sudo bash $0"
     exit 1
 fi
 
+# 检查依赖
+check_dependencies
+
+# 检查 Sing-box 是否已安装
+if ! command -v /usr/local/bin/sing-box &> /dev/null; then
+    clear
+    echo "╔════════════════════════════════════════╗"
+    echo "║    Sing-box 未安装，正在安装...        ║"
+    echo "╚════════════════════════════════════════╝"
+    echo ""
+    install_singbox
+fi
+
+# 启动主菜单
 main
 EOFUI
 
