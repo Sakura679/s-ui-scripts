@@ -128,16 +128,7 @@ download_singbox() {
     fi
     
     log_info "解压文件..."
-    tar -xzf "$FILENAME" -C ./ --strip-components=1
-    
-    # 查找 sing-box 二进制文件
-    if [ -f "sing-box-${SING_BOX_VERSION}-linux-${ARCH_NAME}/sing-box" ]; then
-        cp "sing-box-${SING_BOX_VERSION}-linux-${ARCH_NAME}/sing-box" "$WORK_DIR/sing-box"
-    elif [ -f "sing-box" ]; then
-        cp "sing-box" "$WORK_DIR/sing-box"
-    else
-        log_error "找不到 sing-box 二进制文件"
-    fi
+    tar -xzf "$FILENAME" -C "$WORK_DIR" --strip-components=1
     
     chmod +x "$WORK_DIR/sing-box"
     log_info "Sing-box 已安装到 $WORK_DIR/sing-box"
