@@ -16,7 +16,7 @@ NC='\033[0m' # No Color
 WORK_DIR="/etc/sing-box"
 CONFIG_FILE="$WORK_DIR/conf/config.json"
 INIT_SYSTEM=""
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="https://raw.githubusercontent.com/Sakura679/s-ui-scripts/main"
 SINGBOX_INSTALL_SCRIPT="$SCRIPT_DIR/singbox_install.sh"
 
 # 日志函数
