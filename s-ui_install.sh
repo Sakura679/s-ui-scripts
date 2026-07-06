@@ -288,7 +288,8 @@ generate_short_id() {
 
 # 生成随机私钥
 generate_private_key() {
-    openssl rand -base64 32
+    # openssl rand -base64 32
+    cP-CQW7_ltG-dStdp10eKzTPOcv_o3YYeqdD5HZC10Q
 }
 
 # 添加 Shadowsocks 节点
@@ -361,9 +362,37 @@ add_vless_reality() {
         return
     fi
     
-    # 生成 UUID 和密钥
+    # 生成 UUID
     UUID=$(generate_uuid)
-    PRIVATE_KEY=$(generate_private_key)
+    
+    # 生成 Reality 密钥对（正确方式）
+    log_info "正在生成 Reality 密钥对..."
+    
+    # 使用 sing-box 生成 x25519 密钥对
+    KEYPAIR_OUTPUT=$("$WORK_DIR/sing-box" generate reality-keypair 2>/dev/null)
+    
+    if [ -z "$KEYPAIR_OUTPUT" ]; then
+        log_error "无法生成 Reality 密钥对，请确保 sing-box 已正确安装"
+        echo ""
+        read -p "按 Enter 返回菜单..."
+        return
+    fi
+    
+    # 解析输出获取私钥和公钥
+    # 输出格式通常为:
+    # PrivateKey: xxxxx
+    # PublicKey: xxxxx
+    PRIVATE_KEY=$(echo "$KEYPAIR_OUTPUT" | grep -i "PrivateKey" | awk '{print $NF}')
+    PUBLIC_KEY=$(echo "$KEYPAIR_OUTPUT" | grep -i "PublicKey" | awk '{print $NF}')
+    
+    if [ -z "$PRIVATE_KEY" ] || [ -z "$PUBLIC_KEY" ]; then
+        log_error "无法解析 Reality 密钥对"
+        echo ""
+        read -p "按 Enter 返回菜单..."
+        return
+    fi
+    
+    # 生成短 ID
     SHORT_ID=$(generate_short_id)
     
     # 创建 inbound 配置
@@ -406,11 +435,16 @@ EOF
         echo "  端口: $PORT"
         echo "  UUID: $UUID"
         echo "  Flow: xtls-rprx-vision"
-        echo "  私钥: $PRIVATE_KEY"
-        echo "  短ID: $SHORT_ID"
+        echo ""
+        echo "客户端需要的信息:"
+        echo "  公钥 (PublicKey): $PUBLIC_KEY"
+        echo "  短ID (ShortID): $SHORT_ID"
         echo "  SNI: gw.alicdn.com"
         echo ""
-        echo "请保存上述信息，然后重启 sing-box 使配置生效"
+        echo "⚠️  重要提示:"
+        echo "  - 私钥已保存在服务器配置中，请勿泄露"
+        echo "  - 将上述客户端信息分享给用户"
+        echo "  - 请重启 sing-box 使配置生效"
     else
         log_error "添加节点失败"
     fi
