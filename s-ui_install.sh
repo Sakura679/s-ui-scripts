@@ -372,18 +372,31 @@ import os
 try:
     # 使用 sing-box 生成 reality 密钥对
     result = subprocess.run(['/usr/local/bin/sing-box', 'generate', 'reality-keypair'], 
-                          capture_output=True, text=True)
-    if result.returncode == 0:
-        output = json.loads(result.stdout)
-        print(f"{output['private_key']}|{output['public_key']}")
+                          capture_output=True, text=True, timeout=10)
+    
+    if result.returncode == 0 and result.stdout.strip():
+        # 解析输出格式: PrivateKey: xxx\nPublicKey: yyy
+        lines = result.stdout.strip().split('\n')
+        private_key = ""
+        public_key = ""
+        
+        for line in lines:
+            if line.startswith('PrivateKey:'):
+                private_key = line.split(':', 1)[1].strip()
+            elif line.startswith('PublicKey:'):
+                public_key = line.split(':', 1)[1].strip()
+        
+        if private_key and public_key:
+            print(f"{private_key}|{public_key}")
+        else:
+            print("Error: Could not parse keys", file=__import__('sys').stderr)
+            exit(1)
     else:
-        # 备用方案：生成随机密钥
-        import base64
-        private_key = base64.b64encode(os.urandom(32)).decode('utf-8')
-        public_key = base64.b64encode(os.urandom(32)).decode('utf-8')
-        print(f"{private_key}|{public_key}")
+        print(f"Error: {result.stderr}", file=__import__('sys').stderr)
+        exit(1)
 except Exception as e:
     print(f"Error: {e}", file=__import__('sys').stderr)
+    exit(1)
 EOFPYTHON
 }
 
@@ -488,7 +501,11 @@ add_vless_node() {
     read -p "请输入监听端口: " vless_port
     
     # 自动生成 UUID
-    vless_uuid=$(generate_uuid)
+    vless_uuid=$(/usr/local/bin/sing-box generate uuid 2>/dev/null)
+    if [ -z "$vless_uuid" ]; then
+        print_error "无法生成 UUID"
+        return
+    fi
     
     echo ""
     echo "传输协议选项:"
@@ -523,11 +540,27 @@ add_vless_node() {
             read -p "请输入 SNI (如: gw.alicdn.com): " reality_sni
             
             echo "正在生成 Reality 密钥对..."
-            reality_keys=$(generate_reality_keys)
-            reality_private_key=$(echo $reality_keys | cut -d'|' -f1)
-            reality_public_key=$(echo $reality_keys | cut -d'|' -f2)
             
-            reality_short_id=$(generate_short_id)
+            # 直接调用 sing-box 命令并解析输出
+            reality_output=$(/usr/local/bin/sing-box generate reality-keypair 2>/dev/null)
+            
+            if [ -z "$reality_output" ]; then
+                print_error "无法生成 Reality 密钥对"
+                return
+            fi
+            
+            # 解析输出
+            reality_private_key=$(echo "$reality_output" | grep "PrivateKey:" | awk '{print $2}')
+            reality_public_key=$(echo "$reality_output" | grep "PublicKey:" | awk '{print $2}')
+            
+            if [ -z "$reality_private_key" ] || [ -z "$reality_public_key" ]; then
+                print_error "无法解析 Reality 密钥"
+                echo "调试信息: $reality_output"
+                return
+            fi
+            
+            # 生成 short_id
+            reality_short_id=$(openssl rand -hex 4)
             
             tls_config=$(cat <<EOFTLS
     "tls": {
@@ -535,8 +568,12 @@ add_vless_node() {
       "server_name": "$reality_sni",
       "reality": {
         "enabled": true,
+        "handshake": {
+          "server": "$reality_sni",
+          "server_port": 443
+        },
         "private_key": "$reality_private_key",
-        "short_id": "$reality_short_id"
+        "short_id": ["$reality_short_id"]
       },
       "utls": {
         "enabled": true,
@@ -593,6 +630,7 @@ EOFGRPC
 )
     fi
     
+    # 构建完整的 VLESS 配置
     local vless_config=$(cat <<EOF
 {
   "type": "vless",
@@ -610,6 +648,14 @@ EOFGRPC
 }
 EOF
 )
+    
+    # 验证 JSON 格式
+    if ! echo "$vless_config" | python3 -m json.tool > /dev/null 2>&1; then
+        print_error "生成的配置 JSON 格式错误"
+        echo "调试信息:"
+        echo "$vless_config"
+        return
+    fi
     
     add_inbound_to_config "$vless_config"
     
@@ -633,23 +679,6 @@ EOF
             echo "  模式: 标准 TLS"
             echo "  SNI: $tls_sni"
         fi
-    fi
-    echo ""
-    echo "客户端配置:"
-    echo "  \"server\": \"$vless_listen\","
-    echo "  \"server_port\": $vless_port,"
-    echo "  \"uuid\": \"$vless_uuid\","
-    if [ "$tls_mode" = "2" ]; then
-        echo "  \"tls\": {"
-        echo "    \"enabled\": true,"
-        echo "    \"server_name\": \"$reality_sni\","
-        echo "    \"reality\": {"
-        echo "      \"enabled\": true,"
-        echo "      \"public_key\": \"$reality_public_key\","
-        echo "      \"short_id\": \"$reality_short_id\""
-        echo "    }"
-        echo "  },"
-        echo "  \"flow\": \"xtls-rprx-vision\""
     fi
     echo ""
     read -p "按 Enter 返回菜单..."
@@ -1021,26 +1050,55 @@ add_inbound_to_config() {
     local new_inbound="$1"
     local config_file="$SING_BOX_CONFIG_DIR/config.json"
     
+    # 验证输入的 JSON 格式
+    if ! echo "$new_inbound" | python3 -m json.tool > /dev/null 2>&1; then
+        print_error "输入的 inbound 配置 JSON 格式错误"
+        return 1
+    fi
+    
     # 使用 Python 添加 inbound
-    python3 << EOFPYTHON
+    python3 << 'EOFPYTHON'
 import json
 import sys
 
 try:
-    with open('$config_file', 'r') as f:
-        config = json.load(f)
+    config_file = '$config_file'
     
-    new_inbound = json.loads('''$new_inbound''')
+    # 读取现有配置
+    try:
+        with open(config_file, 'r', encoding='utf-8') as f:
+            config = json.load(f)
+    except FileNotFoundError:
+        # 如果文件不存在，创建新配置
+        config = {
+            "log": {"level": "info"},
+            "inbounds": [],
+            "outbounds": [
+                {"type": "direct", "tag": "direct"},
+                {"type": "block", "tag": "block"}
+            ]
+        }
     
+    # 解析新的 inbound
+    new_inbound_str = '''$new_inbound'''
+    new_inbound = json.loads(new_inbound_str)
+    
+    # 确保 inbounds 数组存在
     if 'inbounds' not in config:
         config['inbounds'] = []
     
+    # 添加新的 inbound
     config['inbounds'].append(new_inbound)
     
-    with open('$config_file', 'w') as f:
+    # 写入配置文件
+    with open(config_file, 'w', encoding='utf-8') as f:
         json.dump(config, f, indent=2, ensure_ascii=False)
     
     print("配置已更新")
+    
+except json.JSONDecodeError as e:
+    print(f"JSON 解析错误: {e}", file=sys.stderr)
+    sys.exit(1)
 except Exception as e:
     print(f"错误: {e}", file=sys.stderr)
     sys.exit(1)
