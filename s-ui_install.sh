@@ -118,7 +118,7 @@ check_dependencies() {
     local missing_deps=()
     
     # 检查必要的命令
-    for cmd in curl wget tar gzip systemctl; do
+    for cmd in curl wget tar gzip systemctl python3 python3-pip; do
         if ! command -v $cmd &> /dev/null; then
             missing_deps+=("$cmd")
         fi
