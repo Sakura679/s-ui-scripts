@@ -24,21 +24,7 @@ chmod +x s-ui_install.sh
 # 执行安装
 sudo bash s-ui_install.sh
 ```
-### 二、安装选项
-```bash
-# 安装 (默认)
-sudo bash s-ui_install.sh install
-
-# 卸载
-sudo bash s-ui_install.sh uninstall
-
-# 更新
-sudo bash s-ui_install.sh update
-
-# 显示帮助
-sudo bash s-ui_install.sh help
-```
-### 三、管理面板使用
+### 二、管理面板使用
 安装完成后，运行以下命令启动管理面板：
 
 ```bash
@@ -58,7 +44,7 @@ s-ui
 6. 卸载 sing-box     - 完全卸载
 0. 退出
 ```
-### 四、支持的节点类型
+### 三、支持的节点类型
 1. Shadowsocks (SS)
 加密方式: aes-128-gcm, aes-256-gcm, chacha20-poly1305
 配置示例：
@@ -131,43 +117,7 @@ s-ui
       }
     }
 ```
-4. Trojan
-配置示例：
-```json
-    {
-      "type": "trojan",
-      "tag": "trojan-in",
-      "listen": "::",
-      "listen_port": 12123,
-      "users": [
-        {
-          "password": "Iq6NSSXsU5GypaQYlQaJ4e9P40zTb7mHmv4tynH5qHY="
-        }
-      ],
-      "tls": {
-        "enabled": true,
-        "certificate_path": "/etc/sing-box/server.crt",
-        "key_path": "/etc/sing-box/server.key"
-      }
-    }
-```
-5. VMess
-配置示例：
-```json
-    {
-      "type": "vmess",
-      "tag": "vmess-in",
-      "listen": "::",
-      "listen_port": 12123,
-      "users": [
-        {
-          "uuid": "26800d23-57be-40b0-8fbd-b9edc0194082",
-          "security": "auto"
-        }
-      ]
-    }
-```
-### 五、常用命令
+### 四、常用命令
 ```bash
 # 启动服务
 systemctl start sing-box
@@ -202,13 +152,13 @@ sing-box version
 # 启动管理面板
 s-ui
 ```
-### 六、配置文件位置
+### 五、配置文件位置
 主配置文件: `/etc/sing-box/config.json`
 日志文件: `/var/log/sing-box/`
 二进制文件: `/usr/local/bin/sing-box`
 Systemd 服务: `/etc/systemd/system/sing-box.service`
 管理面板: `/opt/s-ui/`
-### 七、手动编辑配置
+### 六、手动编辑配置
 ```bash
 # 编辑配置文件
 sudo nano /etc/sing-box/config.json
