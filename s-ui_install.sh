@@ -1,8 +1,7 @@
 #!/bin/bash
 
-# Sing-box 管理面板脚本 (s-ui.sh)
-# 专注于 Sing-box 配置管理
-# 支持 systemd 和 OpenRC
+# S-UI - Sing-box 管理脚本
+# 功能: 一键安装 sing-box 并提供管理面板
 
 set -e
 
@@ -11,19 +10,16 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
-CYAN='\033[0;36m'
-MAGENTA='\033[0;35m'
 NC='\033[0m' # No Color
 
 # 配置变量
 WORK_DIR="/etc/sing-box"
 CONFIG_FILE="$WORK_DIR/conf/config.json"
-BACKUP_DIR="$WORK_DIR/backups"
 INIT_SYSTEM=""
-SING_BOX_BIN="$WORK_DIR/sing-box"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SINGBOX_INSTALL_SCRIPT="$SCRIPT_DIR/singbox_install.sh"
 
-# ==================== 日志函数 ====================
-
+# 日志函数
 log_info() {
     echo -e "${GREEN}[INFO]${NC} $1"
 }
@@ -37,15 +33,10 @@ log_error() {
 }
 
 log_success() {
-    echo -e "${GREEN}[✓]${NC} $1"
+    echo -e "${GREEN}[SUCCESS]${NC} $1"
 }
 
-log_debug() {
-    echo -e "${BLUE}[DEBUG]${NC} $1"
-}
-
-# ==================== 系统检测函数 ====================
-
+# 检查是否为 root
 check_root() {
     if [[ $EUID -ne 0 ]]; then
         log_error "此脚本必须以 root 身份运行"
@@ -53,6 +44,7 @@ check_root() {
     fi
 }
 
+# 检测 init 系统
 detect_init_system() {
     if command -v systemctl &> /dev/null; then
         INIT_SYSTEM="systemd"
@@ -64,1424 +56,659 @@ detect_init_system() {
     fi
 }
 
-check_sing_box_installed() {
-    if [ ! -f "$SING_BOX_BIN" ]; then
-        log_error "Sing-box 未安装，请先运行安装脚本"
-        exit 1
-    fi
-    
-    if [ ! -f "$CONFIG_FILE" ]; then
-        log_error "配置文件不存在: $CONFIG_FILE"
-        exit 1
-    fi
-}
-
-create_backup_dir() {
-    mkdir -p "$BACKUP_DIR"
-}
-
-# ==================== 配置验证函数 ====================
-
-validate_json() {
-    if ! jq empty "$1" 2>/dev/null; then
-        log_error "JSON 格式错误"
+# 检查 sing-box 是否已安装
+check_singbox_installed() {
+    if [ ! -f "$WORK_DIR/sing-box" ]; then
         return 1
     fi
     return 0
 }
 
-check_config_syntax() {
-    log_info "检查配置文件语法..."
-    if "$SING_BOX_BIN" check -c "$CONFIG_FILE" > /dev/null 2>&1; then
-        log_success "配置文件语法正确"
+# 一键安装 sing-box
+install_singbox() {
+    log_info "开始安装 sing-box..."
+    
+    if [ ! -f "$SINGBOX_INSTALL_SCRIPT" ]; then
+        log_error "找不到安装脚本: $SINGBOX_INSTALL_SCRIPT"
+        exit 1
+    fi
+    
+    bash "$SINGBOX_INSTALL_SCRIPT"
+    
+    if check_singbox_installed; then
+        log_success "sing-box 安装成功"
         return 0
     else
-        log_error "配置文件语法错误"
-        "$SING_BOX_BIN" check -c "$CONFIG_FILE"
+        log_error "sing-box 安装失败"
         return 1
     fi
 }
 
-# ==================== 备份恢复函数 ====================
-
-backup_config() {
-    local timestamp=$(date +%Y%m%d_%H%M%S)
-    local backup_file="$BACKUP_DIR/config_${timestamp}.json"
-    cp "$CONFIG_FILE" "$backup_file"
-    log_success "配置已备份到: $backup_file"
-}
-
-list_backups() {
-    clear
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${YELLOW}备份文件列表${NC}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo ""
-    
-    if [ ! -d "$BACKUP_DIR" ] || [ -z "$(ls -A $BACKUP_DIR 2>/dev/null)" ]; then
-        log_warn "暂无备份文件"
-        read -p "按 Enter 继续..."
-        return
-    fi
-    
-    local count=1
-    for backup in $(ls -t "$BACKUP_DIR"/config_*.json 2>/dev/null); do
-        local filename=$(basename "$backup")
-        local size=$(du -h "$backup" | cut -f1)
-        local mtime=$(stat -c %y "$backup" 2>/dev/null | cut -d' ' -f1,2)
-        
-        echo "$count. $filename ($size) - $mtime"
-        ((count++))
-    done
-    
-    echo ""
-    read -p "按 Enter 继续..."
-}
-
-restore_config() {
-    clear
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${YELLOW}恢复配置${NC}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo ""
-    
-    if [ ! -d "$BACKUP_DIR" ] || [ -z "$(ls -A $BACKUP_DIR 2>/dev/null)" ]; then
-        log_warn "暂无备份文件"
-        read -p "按 Enter 继续..."
-        return
-    fi
-    
-    local backups=($(ls -t "$BACKUP_DIR"/config_*.json 2>/dev/null))
-    local count=${#backups[@]}
-    
-    for ((i=0; i<count; i++)); do
-        local filename=$(basename "${backups[$i]}")
-        echo "$((i+1)). $filename"
-    done
-    
-    echo ""
-    read -p "请选择要恢复的备份 (1-$count): " restore_choice
-    
-    if ! [[ "$restore_choice" =~ ^[0-9]+$ ]] || [ "$restore_choice" -lt 1 ] || [ "$restore_choice" -gt "$count" ]; then
-        log_error "无效选择"
-        read -p "按 Enter 继续..."
-        return 1
-    fi
-    
-    local restore_index=$((restore_choice - 1))
-    local restore_file="${backups[$restore_index]}"
-    
-    read -p "确认恢复此备份吗? (y/n): " confirm
-    
-    if [ "$confirm" != "y" ]; then
-        log_warn "已取消恢复"
-        read -p "按 Enter 继续..."
-        return
-    fi
-    
-    # 备份当前配置
-    backup_config
-    
-    # 恢复备份
-    cp "$restore_file" "$CONFIG_FILE"
-    
-    if check_config_syntax; then
-        log_success "配置已恢复"
-        
-        read -p "是否立即重启服务? (y/n): " restart_confirm
-        if [ "$restart_confirm" = "y" ]; then
-            restart_service
+# 获取 sing-box 运行状态
+get_singbox_status() {
+    if [ "$INIT_SYSTEM" = "systemd" ]; then
+        if systemctl is-active --quiet sing-box; then
+            echo "运行中"
+            return 0
+        else
+            echo "已停止"
+            return 1
         fi
-    else
-        log_error "恢复失败，已恢复之前的备份"
-        read -p "按 Enter 继续..."
-        return 1
+    elif [ "$INIT_SYSTEM" = "openrc" ]; then
+        if rc-service sing-box status > /dev/null 2>&1; then
+            echo "运行中"
+            return 0
+        else
+            echo "已停止"
+            return 1
+        fi
     fi
-    
-    read -p "按 Enter 继续..."
 }
 
-# ==================== 服务管理函数 ====================
-
-start_service() {
+# 查看 sing-box 运行状态
+view_status() {
     clear
-    log_info "启动 Sing-box 服务..."
+    echo -e "${BLUE}╔════════════════════════════════════════╗${NC}"
+    echo -e "${BLUE}║        Sing-box 运行状态               ║${NC}"
+    echo -e "${BLUE}╚════════════════════════════════════════╝${NC}"
+    echo ""
+    
+    if ! check_singbox_installed; then
+        log_error "sing-box 未安装"
+        echo ""
+        read -p "按 Enter 返回菜单..."
+        return
+    fi
+    
+    STATUS=$(get_singbox_status)
+    if [ "$STATUS" = "运行中" ]; then
+        echo -e "${GREEN}状态: $STATUS${NC}"
+    else
+        echo -e "${RED}状态: $STATUS${NC}"
+    fi
+    
+    echo ""
+    echo "版本信息:"
+    "$WORK_DIR/sing-box" version 2>/dev/null || echo "无法获取版本信息"
+    
+    echo ""
+    echo "详细状态:"
+    if [ "$INIT_SYSTEM" = "systemd" ]; then
+        systemctl status sing-box --no-pager 2>/dev/null || echo "无法获取状态"
+    elif [ "$INIT_SYSTEM" = "openrc" ]; then
+        rc-service sing-box status 2>/dev/null || echo "无法获取状态"
+    fi
+    
+    echo ""
+    read -p "按 Enter 返回菜单..."
+}
+
+# 查看配置文件
+view_config() {
+    clear
+    echo -e "${BLUE}╔════════════════════════════════════════╗${NC}"
+    echo -e "${BLUE}║        Sing-box 配置文件               ║${NC}"
+    echo -e "${BLUE}╚════════════════════════════════════════╝${NC}"
+    echo ""
+    
+    if [ ! -f "$CONFIG_FILE" ]; then
+        log_error "配置文件不存在: $CONFIG_FILE"
+        echo ""
+        read -p "按 Enter 返回菜单..."
+        return
+    fi
+    
+    echo "配置文件位置: $CONFIG_FILE"
+    echo ""
+    echo "配置内容:"
+    echo "─────────────────────────────────────────"
+    cat "$CONFIG_FILE" | jq '.' 2>/dev/null || cat "$CONFIG_FILE"
+    echo "─────────────────────────────────────────"
+    echo ""
+    read -p "按 Enter 返回菜单..."
+}
+
+# 启动 sing-box
+start_singbox() {
+    clear
+    echo -e "${BLUE}╔════════════════════════════════════════╗${NC}"
+    echo -e "${BLUE}║        启动 Sing-box                   ║${NC}"
+    echo -e "${BLUE}╚════════════════════════════════════════╝${NC}"
+    echo ""
+    
+    if ! check_singbox_installed; then
+        log_error "sing-box 未安装"
+        echo ""
+        read -p "按 Enter 返回菜单..."
+        return
+    fi
+    
+    log_info "正在启动 sing-box..."
     
     if [ "$INIT_SYSTEM" = "systemd" ]; then
         systemctl start sing-box
-        sleep 2
-        if systemctl is-active --quiet sing-box; then
-            log_success "Sing-box 服务已启动"
-        else
-            log_error "Sing-box 服务启动失败"
-        fi
     elif [ "$INIT_SYSTEM" = "openrc" ]; then
         rc-service sing-box start
-        sleep 2
-        if rc-service sing-box status > /dev/null 2>&1; then
-            log_success "Sing-box 服务已启动"
-        else
-            log_error "Sing-box 服务启动失败"
-        fi
     fi
     
-    read -p "按 Enter 继续..."
-}
-
-stop_service() {
-    clear
-    log_info "停止 Sing-box 服务..."
+    sleep 2
     
-    if [ "$INIT_SYSTEM" = "systemd" ]; then
-        systemctl stop sing-box
-        sleep 2
-        if ! systemctl is-active --quiet sing-box; then
-            log_success "Sing-box 服务已停止"
-        else
-            log_error "Sing-box 服务停止失败"
-        fi
-    elif [ "$INIT_SYSTEM" = "openrc" ]; then
-        rc-service sing-box stop
-        sleep 2
-        if ! rc-service sing-box status > /dev/null 2>&1; then
-            log_success "Sing-box 服务已停止"
-        else
-            log_error "Sing-box 服务停止失败"
-        fi
-    fi
-    
-    read -p "按 Enter 继续..."
-}
-
-restart_service() {
-    clear
-    log_info "重启 Sing-box 服务..."
-    
-    if [ "$INIT_SYSTEM" = "systemd" ]; then
-        systemctl restart sing-box
-        sleep 2
-        if systemctl is-active --quiet sing-box; then
-            log_success "Sing-box 服务已重启"
-        else
-            log_error "Sing-box 服务重启失败"
-        fi
-    elif [ "$INIT_SYSTEM" = "openrc" ]; then
-        rc-service sing-box restart
-        sleep 2
-        if rc-service sing-box status > /dev/null 2>&1; then
-            log_success "Sing-box 服务已重启"
-        else
-            log_error "Sing-box 服务重启失败"
-        fi
-    fi
-    
-    read -p "按 Enter 继续..."
-}
-
-show_service_status() {
-    clear
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${YELLOW}Sing-box 服务状态${NC}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo ""
-    
-    if [ "$INIT_SYSTEM" = "systemd" ]; then
-        systemctl status sing-box --no-pager
-    elif [ "$INIT_SYSTEM" = "openrc" ]; then
-        rc-service sing-box status
+    STATUS=$(get_singbox_status)
+    if [ "$STATUS" = "运行中" ]; then
+        log_success "sing-box 已启动"
+    else
+        log_error "sing-box 启动失败"
     fi
     
     echo ""
-    read -p "按 Enter 继续..."
+    read -p "按 Enter 返回菜单..."
 }
 
-show_logs() {
+# 停止 sing-box
+stop_singbox() {
     clear
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${YELLOW}Sing-box 实时日志 (按 Ctrl+C 退出)${NC}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${BLUE}╔════════════════════════════════════════╗${NC}"
+    echo -e "${BLUE}║        停止 Sing-box                   ║${NC}"
+    echo -e "${BLUE}╚════════════════════════════════════════╝${NC}"
     echo ""
     
-    if [ "$INIT_SYSTEM" = "systemd" ]; then
-        journalctl -u sing-box -f
-    elif [ "$INIT_SYSTEM" = "openrc" ]; then
-        tail -f /var/log/messages | grep sing-box
-    fi
-}
-
-show_version() {
-    clear
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${YELLOW}Sing-box 版本信息${NC}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo ""
-    "$SING_BOX_BIN" version
-    echo ""
-    read -p "按 Enter 继续..."
-}
-
-# ==================== 节点管理函数 ====================
-
-get_inbound_count() {
-    jq '.inbounds | length' "$CONFIG_FILE"
-}
-
-show_inbound_list() {
-    clear
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${YELLOW}Sing-box 节点列表${NC}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo ""
-    
-    local count=$(get_inbound_count)
-    
-    if [ "$count" -eq 0 ]; then
-        log_warn "暂无节点"
+    if ! check_singbox_installed; then
+        log_error "sing-box 未安装"
+        echo ""
+        read -p "按 Enter 返回菜单..."
         return
     fi
     
-    for ((i=0; i<count; i++)); do
-        local tag=$(jq -r ".inbounds[$i].tag" "$CONFIG_FILE")
-        local type=$(jq -r ".inbounds[$i].type" "$CONFIG_FILE")
-        local port=$(jq -r ".inbounds[$i].listen_port // .inbounds[$i].port // \"N/A\"" "$CONFIG_FILE")
-        
-        echo "$((i+1)). [$type] $tag (端口: $port)"
-    done
+    log_info "正在停止 sing-box..."
     
-    echo ""
-}
-
-add_shadowsocks_node() {
-    clear
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${YELLOW}添加 Shadowsocks 节点${NC}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo ""
-    
-    read -p "请输入节点标签: " tag
-    read -p "请输入监听端口: " port
-    read -p "请输入加密方法 (aes-256-gcm/chacha20-poly1305): " method
-    read -p "请输入密码: " password
-    
-    if [ -z "$tag" ] || [ -z "$port" ] || [ -z "$method" ] || [ -z "$password" ]; then
-        log_error "输入不能为空"
-        read -p "按 Enter 继续..."
-        return 1
+    if [ "$INIT_SYSTEM" = "systemd" ]; then
+        systemctl stop sing-box
+    elif [ "$INIT_SYSTEM" = "openrc" ]; then
+        rc-service sing-box stop
     fi
     
-    backup_config
+    sleep 2
     
-    local new_inbound=$(cat <<EOF
-{
-  "type": "shadowsocks",
-  "tag": "$tag",
-  "listen": "::",
-  "listen_port": $port,
-  "method": "$method",
-  "password": "$password",
-  "network": "tcp,udp"
-}
-EOF
-)
-    local new_inbound=$(cat <<EOF
-{
-  "type": "shadowsocks",
-  "tag": "$tag",
-  "listen": "::",
-  "listen_port": $port,
-  "method": "$method",
-  "password": "$password",
-  "network": "tcp,udp"
-}
-EOF
-)
-
-    jq ".inbounds += [$new_inbound]" "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
-    
-    if check_config_syntax; then
-        log_success "Shadowsocks 节点已添加"
-        read -p "是否立即重启服务? (y/n): " restart_confirm
-        if [ "$restart_confirm" = "y" ]; then
-            restart_service
-        fi
+    STATUS=$(get_singbox_status)
+    if [ "$STATUS" = "已停止" ]; then
+        log_success "sing-box 已停止"
     else
-        log_error "配置错误，已恢复备份"
-        cp "$BACKUP_DIR"/config_*.json "$CONFIG_FILE" | tail -1
-        read -p "按 Enter 继续..."
-        return 1
+        log_error "sing-box 停止失败"
     fi
     
-    read -p "按 Enter 继续..."
+    echo ""
+    read -p "按 Enter 返回菜单..."
 }
 
-add_vless_reality_node() {
+# 重启 sing-box
+restart_singbox() {
     clear
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${YELLOW}添加 VLESS+Reality 节点${NC}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${BLUE}╔════════════════════════════════════════╗${NC}"
+    echo -e "${BLUE}║        重启 Sing-box                   ║${NC}"
+    echo -e "${BLUE}╚════════════════════════════════════════╝${NC}"
     echo ""
     
-    read -p "请输入节点标签: " tag
-    read -p "请输入监听端口: " port
-    read -p "请输入 UUID: " uuid
-    read -p "请输入 SNI (如: gw.alicdn.com): " sni
-    read -p "请输入握手服务器地址: " handshake_server
-    read -p "请输入握手服务器端口 (默认: 443): " handshake_port
-    handshake_port=${handshake_port:-443}
-    read -p "请输入私钥: " private_key
-    read -p "请输入 Short ID (如: db1df8): " short_id
-    
-    if [ -z "$tag" ] || [ -z "$port" ] || [ -z "$uuid" ] || [ -z "$sni" ] || [ -z "$private_key" ]; then
-        log_error "输入不能为空"
-        read -p "按 Enter 继续..."
-        return 1
+    if ! check_singbox_installed; then
+        log_error "sing-box 未安装"
+        echo ""
+        read -p "按 Enter 返回菜单..."
+        return
     fi
     
-    backup_config
+    log_info "正在重启 sing-box..."
     
-    local new_inbound=$(cat <<EOF
+    if [ "$INIT_SYSTEM" = "systemd" ]; then
+        systemctl restart sing-box
+    elif [ "$INIT_SYSTEM" = "openrc" ]; then
+        rc-service sing-box restart
+    fi
+    
+    sleep 2
+    
+    STATUS=$(get_singbox_status)
+    if [ "$STATUS" = "运行中" ]; then
+        log_success "sing-box 已重启"
+    else
+        log_error "sing-box 重启失败"
+    fi
+    
+    echo ""
+    read -p "按 Enter 返回菜单..."
+}
+
+# 生成随机密码 (Base64)
+generate_password() {
+    openssl rand -base64 24
+}
+
+# 生成随机 UUID
+generate_uuid() {
+    cat /proc/sys/kernel/random/uuid
+}
+
+# 生成随机短 ID
+generate_short_id() {
+    openssl rand -hex 3
+}
+
+# 生成随机私钥
+generate_private_key() {
+    openssl rand -base64 32
+}
+
+# 添加 Shadowsocks 节点
+add_shadowsocks() {
+    clear
+    echo -e "${BLUE}╔════════════════════════════════════════╗${NC}"
+    echo -e "${BLUE}║      添加 Shadowsocks 节点             ║${NC}"
+    echo -e "${BLUE}╚════════════════════════════════════════╝${NC}"
+    echo ""
+    
+    read -p "请输入监听端口 (1-65535): " PORT
+    
+    # 验证端口号
+    if ! [[ "$PORT" =~ ^[0-9]+$ ]] || [ "$PORT" -lt 1 ] || [ "$PORT" -gt 65535 ]; then
+        log_error "无效的端口号"
+        echo ""
+        read -p "按 Enter 返回菜单..."
+        return
+    fi
+    
+    # 生成密码
+    PASSWORD=$(generate_password)
+    
+    # 创建 inbound 配置
+    INBOUND=$(cat <<EOF
+{
+  "type": "shadowsocks",
+  "tag": "ss-in-$PORT",
+  "listen": "::",
+  "listen_port": $PORT,
+  "method": "aes-256-gcm",
+  "password": "$PASSWORD"
+}
+EOF
+)
+    
+    # 添加到配置文件
+    if add_inbound_to_config "$INBOUND"; then
+        log_success "Shadowsocks 节点已添加"
+        echo ""
+        echo "节点信息:"
+        echo "  端口: $PORT"
+        echo "  加密方式: aes-256-gcm"
+        echo "  密码: $PASSWORD"
+        echo ""
+        echo "请保存上述信息，然后重启 sing-box 使配置生效"
+    else
+        log_error "添加节点失败"
+    fi
+    
+    echo ""
+    read -p "按 Enter 返回菜单..."
+}
+
+# 添加 VLESS+Reality 节点
+add_vless_reality() {
+    clear
+    echo -e "${BLUE}╔════════════════════════════════════════╗${NC}"
+    echo -e "${BLUE}║      添加 VLESS+Reality 节点           ║${NC}"
+    echo -e "${BLUE}╚════════════════════════════════════════╝${NC}"
+    echo ""
+    
+    read -p "请输入监听端口 (1-65535): " PORT
+    
+    # 验证端口号
+    if ! [[ "$PORT" =~ ^[0-9]+$ ]] || [ "$PORT" -lt 1 ] || [ "$PORT" -gt 65535 ]; then
+        log_error "无效的端口号"
+        echo ""
+        read -p "按 Enter 返回菜单..."
+        return
+    fi
+    
+    # 生成 UUID 和密钥
+    UUID=$(generate_uuid)
+    PRIVATE_KEY=$(generate_private_key)
+    SHORT_ID=$(generate_short_id)
+    
+    # 创建 inbound 配置
+    INBOUND=$(cat <<EOF
 {
   "type": "vless",
-  "tag": "$tag",
+  "tag": "reality-in-$PORT",
   "listen": "::",
-  "listen_port": $port,
+  "listen_port": $PORT,
   "users": [
     {
-      "uuid": "$uuid"
+      "uuid": "$UUID",
+      "flow": "xtls-rprx-vision"
     }
   ],
   "tls": {
     "enabled": true,
-    "server_name": "$sni",
+    "server_name": "gw.alicdn.com",
     "reality": {
       "enabled": true,
       "handshake": {
-        "server": "$handshake_server",
-        "port": $handshake_port
+        "server": "gw.alicdn.com",
+        "server_port": 443
       },
-      "private_key": "$private_key",
+      "private_key": "$PRIVATE_KEY",
       "short_id": [
-        "$short_id"
+        "$SHORT_ID"
       ]
     }
   }
 }
 EOF
 )
-
-    jq ".inbounds += [$new_inbound]" "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
     
-    if check_config_syntax; then
+    # 添加到配置文件
+    if add_inbound_to_config "$INBOUND"; then
         log_success "VLESS+Reality 节点已添加"
-        read -p "是否立即重启服务? (y/n): " restart_confirm
-        if [ "$restart_confirm" = "y" ]; then
-            restart_service
-        fi
+        echo ""
+        echo "节点信息:"
+        echo "  端口: $PORT"
+        echo "  UUID: $UUID"
+        echo "  Flow: xtls-rprx-vision"
+        echo "  私钥: $PRIVATE_KEY"
+        echo "  短ID: $SHORT_ID"
+        echo "  SNI: gw.alicdn.com"
+        echo ""
+        echo "请保存上述信息，然后重启 sing-box 使配置生效"
     else
-        log_error "配置错误，已恢复备份"
-        cp "$(ls -t $BACKUP_DIR/config_*.json | head -1)" "$CONFIG_FILE"
-        read -p "按 Enter 继续..."
-        return 1
+        log_error "添加节点失败"
     fi
     
-    read -p "按 Enter 继续..."
+    echo ""
+    read -p "按 Enter 返回菜单..."
 }
 
-add_hysteria2_node() {
+# 添加 Hysteria2 节点
+add_hysteria2() {
     clear
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${YELLOW}添加 Hysteria2 节点${NC}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${BLUE}╔════════════════════════════════════════╗${NC}"
+    echo -e "${BLUE}║      添加 Hysteria2 节点               ║${NC}"
+    echo -e "${BLUE}╚════════════════════════════════════════╝${NC}"
     echo ""
     
-    read -p "请输入节点标签: " tag
-    read -p "请输入监听端口: " port
-    read -p "请输入密码: " password
-    read -p "请输入证书路径 (默认: /etc/sing-box/server.crt): " cert_path
-    cert_path=${cert_path:-/etc/sing-box/server.crt}
-    read -p "请输入密钥路径 (默认: /etc/sing-box/server.key): " key_path
-    key_path=${key_path:-/etc/sing-box/server.key}
+    read -p "请输入监听端口 (1-65535): " PORT
     
-    if [ -z "$tag" ] || [ -z "$port" ] || [ -z "$password" ]; then
-        log_error "输入不能为空"
-        read -p "按 Enter 继续..."
-        return 1
+    # 验证端口号
+    if ! [[ "$PORT" =~ ^[0-9]+$ ]] || [ "$PORT" -lt 1 ] || [ "$PORT" -gt 65535 ]; then
+        log_error "无效的端口号"
+        echo ""
+        read -p "按 Enter 返回菜单..."
+        return
     fi
     
-    if [ ! -f "$cert_path" ] || [ ! -f "$key_path" ]; then
-        log_error "证书或密钥文件不存在"
-        read -p "按 Enter 继续..."
-        return 1
-    fi
+    # 生成密码
+    PASSWORD=$(generate_password)
     
-    backup_config
-    
-    local new_inbound=$(cat <<EOF
+    # 创建 inbound 配置
+    INBOUND=$(cat <<EOF
 {
   "type": "hysteria2",
-  "tag": "$tag",
+  "tag": "hy2-in-$PORT",
   "listen": "::",
-  "listen_port": $port,
+  "listen_port": $PORT,
   "users": [
     {
-      "password": "$password"
+      "password": "$PASSWORD"
     }
   ],
   "tls": {
     "enabled": true,
-    "certificate_path": "$cert_path",
-    "key_path": "$key_path"
+    "certificate_path": "/etc/sing-box/server.crt",
+    "key_path": "/etc/sing-box/server.key"
   }
 }
 EOF
 )
-
-    jq ".inbounds += [$new_inbound]" "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
     
-    if check_config_syntax; then
+    # 添加到配置文件
+    if add_inbound_to_config "$INBOUND"; then
         log_success "Hysteria2 节点已添加"
-        read -p "是否立即重启服务? (y/n): " restart_confirm
-        if [ "$restart_confirm" = "y" ]; then
-            restart_service
-        fi
+        echo ""
+        echo "节点信息:"
+        echo "  端口: $PORT"
+        echo "  密码: $PASSWORD"
+        echo "  证书: /etc/sing-box/server.crt"
+        echo "  密钥: /etc/sing-box/server.key"
+        echo ""
+        echo "请保存上述信息，然后重启 sing-box 使配置生效"
     else
-        log_error "配置错误，已恢复备份"
-        cp "$(ls -t $BACKUP_DIR/config_*.json | head -1)" "$CONFIG_FILE"
-        read -p "按 Enter 继续..."
+        log_error "添加节点失败"
+    fi
+    
+    echo ""
+    read -p "按 Enter 返回菜单..."
+}
+
+# 将 inbound 添加到配置文件
+add_inbound_to_config() {
+    local INBOUND="$1"
+    
+    if [ ! -f "$CONFIG_FILE" ]; then
+        log_error "配置文件不存在"
         return 1
     fi
     
-    read -p "按 Enter 继续..."
-}
-
-add_trojan_node() {
-    clear
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${YELLOW}添加 Trojan 节点${NC}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo ""
+    # 备份原配置文件
+    cp "$CONFIG_FILE" "$CONFIG_FILE.bak"
     
-    read -p "请输入节点标签: " tag
-    read -p "请输入监听端口: " port
-    read -p "请输入密码: " password
-    read -p "请输入证书路径 (默认: /etc/sing-box/server.crt): " cert_path
-    cert_path=${cert_path:-/etc/sing-box/server.crt}
-    read -p "请输入密钥路径 (默认: /etc/sing-box/server.key): " key_path
-    key_path=${key_path:-/etc/sing-box/server.key}
-    
-    if [ -z "$tag" ] || [ -z "$port" ] || [ -z "$password" ]; then
-        log_error "输入不能为空"
-        read -p "按 Enter 继续..."
+    # 使用 jq 添加 inbound
+    if ! jq ".inbounds += [$INBOUND]" "$CONFIG_FILE" > "$CONFIG_FILE.tmp"; then
+        log_error "配置文件格式错误或 jq 不可用"
+        mv "$CONFIG_FILE.bak" "$CONFIG_FILE"
         return 1
     fi
     
-    if [ ! -f "$cert_path" ] || [ ! -f "$key_path" ]; then
-        log_error "证书或密钥文件不存在"
-        read -p "按 Enter 继续..."
+    # 验证新配置文件的有效性
+    if ! jq empty "$CONFIG_FILE.tmp" 2>/dev/null; then
+        log_error "新配置文件格式无效"
+        mv "$CONFIG_FILE.bak" "$CONFIG_FILE"
+        rm -f "$CONFIG_FILE.tmp"
         return 1
     fi
     
-    backup_config
+    # 替换配置文件
+    mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+    rm -f "$CONFIG_FILE.bak"
     
-    local new_inbound=$(cat <<EOF
-{
-  "type": "trojan",
-  "tag": "$tag",
-  "listen": "::",
-  "listen_port": $port,
-  "users": [
-    {
-      "password": "$password"
-    }
-  ],
-  "tls": {
-    "enabled": true,
-    "certificate_path": "$cert_path",
-    "key_path": "$key_path"
-  }
-}
-EOF
-)
-
-    jq ".inbounds += [$new_inbound]" "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
-    
-    if check_config_syntax; then
-        log_success "Trojan 节点已添加"
-        read -p "是否立即重启服务? (y/n): " restart_confirm
-        if [ "$restart_confirm" = "y" ]; then
-            restart_service
-        fi
-    else
-        log_error "配置错误，已恢复备份"
-        cp "$(ls -t $BACKUP_DIR/config_*.json | head -1)" "$CONFIG_FILE"
-        read -p "按 Enter 继续..."
-        return 1
-    fi
-    
-    read -p "按 Enter 继续..."
+    return 0
 }
 
-add_node_menu() {
-    clear
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${YELLOW}添加节点${NC}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo "1. Shadowsocks"
-    echo "2. VLESS+Reality"
-    echo "3. Hysteria2"
-    echo "4. Trojan"
-    echo "5. 返回主菜单"
-    echo ""
-    read -p "请选择协议 (1-5): " choice
-    
-    case $choice in
-        1) add_shadowsocks_node ;;
-        2) add_vless_reality_node ;;
-        3) add_hysteria2_node ;;
-        4) add_trojan_node ;;
-        5) return ;;
-        *) log_error "无效选择" ;;
-    esac
-}
-
-delete_node() {
-    clear
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${YELLOW}删除节点${NC}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo ""
-    
-    show_inbound_list
-    
-    local count=$(get_inbound_count)
-    
-    if [ "$count" -eq 0 ]; then
-        read -p "按 Enter 继续..."
-        return
-    fi
-    
-    read -p "请输入要删除的节点编号 (1-$count): " node_num
-    
-    if ! [[ "$node_num" =~ ^[0-9]+$ ]] || [ "$node_num" -lt 1 ] || [ "$node_num" -gt "$count" ]; then
-        log_error "无效选择"
-        read -p "按 Enter 继续..."
-        return 1
-    fi
-    
-    local delete_index=$((node_num - 1))
-    local tag=$(jq -r ".inbounds[$delete_index].tag" "$CONFIG_FILE")
-    
-    read -p "确认删除节点 '$tag' 吗? (y/n): " confirm
-    
-    if [ "$confirm" != "y" ]; then
-        log_warn "已取消删除"
-        read -p "按 Enter 继续..."
-        return
-    fi
-    
-    backup_config
-    
-    jq "del(.inbounds[$delete_index])" "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
-    
-    if check_config_syntax; then
-        log_success "节点已删除"
-        read -p "是否立即重启服务? (y/n): " restart_confirm
-        if [ "$restart_confirm" = "y" ]; then
-            restart_service
-        fi
-    else
-        log_error "配置错误，已恢复备份"
-        cp "$(ls -t $BACKUP_DIR/config_*.json | head -1)" "$CONFIG_FILE"
-        read -p "按 Enter 继续..."
-        return 1
-    fi
-    
-    read -p "按 Enter 继续..."
-}
-
-modify_node() {
-    clear
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${YELLOW}修改节点${NC}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo ""
-    
-    show_inbound_list
-    
-    local count=$(get_inbound_count)
-    
-    if [ "$count" -eq 0 ]; then
-        read -p "按 Enter 继续..."
-        return
-    fi
-    
-    read -p "请输入要修改的节点编号 (1-$count): " node_num
-    
-    if ! [[ "$node_num" =~ ^[0-9]+$ ]] || [ "$node_num" -lt 1 ] || [ "$node_num" -gt "$count" ]; then
-        log_error "无效选择"
-        read -p "按 Enter 继续..."
-        return 1
-    fi
-    
-    local modify_index=$((node_num - 1))
-    local type=$(jq -r ".inbounds[$modify_index].type" "$CONFIG_FILE")
-    local tag=$(jq -r ".inbounds[$modify_index].tag" "$CONFIG_FILE")
-    
-    clear
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${YELLOW}修改节点: $tag ($type)${NC}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo "1. 修改端口"
-    echo "2. 修改密码/UUID"
-    echo "3. 修改 SNI/Host"
-    echo "4. 查看完整配置"
-    echo "5. 返回"
-    echo ""
-    read -p "请选择修改项 (1-5): " modify_choice
-    
-    case $modify_choice in
-        1)
-            read -p "请输入新端口: " new_port
-            if ! [[ "$new_port" =~ ^[0-9]+$ ]]; then
-                log_error "端口必须是数字"
-                read -p "按 Enter 继续..."
-                return 1
-            fi
-            backup_config
-            jq ".inbounds[$modify_index].listen_port = $new_port" "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
-            if check_config_syntax; then
-                log_success "端口已修改为: $new_port"
-                read -p "是否立即重启服务? (y/n): " restart_confirm
-                if [ "$restart_confirm" = "y" ]; then
-                    restart_service
-                fi
-            else
-                log_error "配置错误，已恢复备份"
-                cp "$(ls -t $BACKUP_DIR/config_*.json | head -1)" "$CONFIG_FILE"
-            fi
-            ;;
-        2)
-            if [ "$type" = "shadowsocks" ]; then
-                read -p "请输入新密码: " new_password
-                backup_config
-                jq ".inbounds[$modify_index].password = \"$new_password\"" "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
-            elif [ "$type" = "vless" ]; then
-                read -p "请输入新 UUID: " new_uuid
-                backup_config
-                jq ".inbounds[$modify_index].users[0].uuid = \"$new_uuid\"" "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
-            elif [ "$type" = "trojan" ] || [ "$type" = "hysteria2" ]; then
-                read -p "请输入新密码: " new_password
-                backup_config
-                jq ".inbounds[$modify_index].users[0].password = \"$new_password\"" "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
-            fi
-            
-            if check_config_syntax; then
-                log_success "密码/UUID 已修改"
-                read -p "是否立即重启服务? (y/n): " restart_confirm
-                if [ "$restart_confirm" = "y" ]; then
-                    restart_service
-                fi
-            else
-                log_error "配置错误，已恢复备份"
-                cp "$(ls -t $BACKUP_DIR/config_*.json | head -1)" "$CONFIG_FILE"
-            fi
-            ;;
-        3)
-            if [ "$type" = "vless" ]; then
-                read -p "请输入新 SNI: " new_sni
-                backup_config
-                jq ".inbounds[$modify_index].tls.server_name = \"$new_sni\"" "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
-                log_success "SNI 已修改为: $new_sni"
-            else
-                log_warn "此节点类型不支持修改 SNI"
-            fi
-            ;;
-        4)
-            clear
-            echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-            echo -e "${YELLOW}节点完整配置${NC}"
-            echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-            echo ""
-            jq ".inbounds[$modify_index]" "$CONFIG_FILE"
-            echo ""
-            ;;
-        5)
-            return
-            ;;
-        *)
-            log_error "无效选择"
-            ;;
-    esac
-    
-    read -p "按 Enter 继续..."
-}
-
-show_node_info() {
-    clear
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${YELLOW}查看节点信息${NC}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo ""
-    
-    show_inbound_list
-    
-    local count=$(get_inbound_count)
-    
-    if [ "$count" -eq 0 ]; then
-        read -p "按 Enter 继续..."
-        return
-    fi
-    
-    read -p "请输入要查看的节点编号 (1-$count): " node_num
-    
-    if ! [[ "$node_num" =~ ^[0-9]+$ ]] || [ "$node_num" -lt 1 ] || [ "$node_num" -gt "$count" ]; then
-        log_error "无效选择"
-        read -p "按 Enter 继续..."
-        return 1
-    fi
-    
-    local view_index=$((node_num - 1))
-    
-    clear
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${YELLOW}节点详细信息${NC}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo ""
-    jq ".inbounds[$view_index]" "$CONFIG_FILE" | jq '.'
-    echo ""
-    read -p "按 Enter 继续..."
-}
-
-# ==================== 配置文件管理函数 ====================
-
-view_config() {
-    clear
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${YELLOW}查看配置文件${NC}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo ""
-    jq '.' "$CONFIG_FILE"
-    echo ""
-    read -p "按 Enter 继续..."
-}
-
-edit_config() {
-    clear
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${YELLOW}编辑配置文件${NC}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo ""
-    
-    backup_config
-    
-    if command -v nano &> /dev/null; then
-        nano "$CONFIG_FILE"
-    elif command -v vi &> /dev/null; then
-        vi "$CONFIG_FILE"
-    else
-        log_error "未找到文本编辑器 (nano/vi)"
-        read -p "按 Enter 继续..."
-        return 1
-    fi
-    
-    if check_config_syntax; then
-        log_success "配置文件已保存"
-        read -p "是否立即重启服务? (y/n): " restart_confirm
-        if [ "$restart_confirm" = "y" ]; then
-            restart_service
-        fi
-    else
-        log_error "配置文件有错误，已恢复备份"
-        cp "$(ls -t $BACKUP_DIR/config_*.json | head -1)" "$CONFIG_FILE"
-        read -p "按 Enter 继续..."
-        return 1
-    fi
-    
-    read -p "按 Enter 继续..."
-}
-
-format_config() {
-    clear
-    log_info "格式化配置文件..."
-    
-    backup_config
-    
-    if "$SING_BOX_BIN" format -w -c "$CONFIG_FILE" > /dev/null 2>&1; then
-        log_success "配置文件已格式化"
-    else
-        log_error "格式化失败"
-        cp "$(ls -t $BACKUP_DIR/config_*.json | head -1)" "$CONFIG_FILE"
-    fi
-    
-    read -p "按 Enter 继续..."
-}
-
-merge_config() {
-    clear
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${YELLOW}合并配置文件${NC}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo ""
-    
-    read -p "请输入配置目录路径 (默认: $WORK_DIR/conf): " config_dir
-    config_dir=${config_dir:-$WORK_DIR/conf}
-    
-    if [ ! -d "$config_dir" ]; then
-        log_error "目录不存在: $config_dir"
-        read -p "按 Enter 继续..."
-        return 1
-    fi
-    
-    backup_config
-    
-    local output_file="$WORK_DIR/config_merged.json"
-    
-    if "$SING_BOX_BIN" merge "$output_file" -c "$CONFIG_FILE" -D "$config_dir" > /dev/null 2>&1; then
-        log_success "配置已合并到: $output_file"
-        
-        read -p "是否使用合并后的配置? (y/n): " use_merged
-        if [ "$use_merged" = "y" ]; then
-            cp "$output_file" "$CONFIG_FILE"
-            log_success "已切换到合并配置"
-            read -p "是否立即重启服务? (y/n): " restart_confirm
-            if [ "$restart_confirm" = "y" ]; then
-                restart_service
-            fi
-        fi
-    else
-        log_error "合并失败"
-    fi
-    
-    read -p "按 Enter 继续..."
-}
-
-# ==================== 出站管理函数 ====================
-
-show_outbound_list() {
-    clear
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${YELLOW}出站列表${NC}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo ""
-    
-    local count=$(jq '.outbounds | length' "$CONFIG_FILE")
-    
-    if [ "$count" -eq 0 ]; then
-        log_warn "暂无出站"
-        return
-    fi
-    
-    for ((i=0; i<count; i++)); do
-        local tag=$(jq -r ".outbounds[$i].tag" "$CONFIG_FILE")
-        local type=$(jq -r ".outbounds[$i].type" "$CONFIG_FILE")
-        
-        echo "$((i+1)). [$type] $tag"
-    done
-    
-    echo ""
-}
-
-add_direct_outbound() {
-    clear
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${YELLOW}添加直连出站${NC}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo ""
-    
-    read -p "请输入出站标签: " tag
-    
-    if [ -z "$tag" ]; then
-        log_error "标签不能为空"
-        read -p "按 Enter 继续..."
-        return 1
-    fi
-    
-    backup_config
-    
-    local new_outbound=$(cat <<EOF
-{
-  "type": "direct",
-  "tag": "$tag"
-}
-EOF
-)
-
-    jq ".outbounds += [$new_outbound]" "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
-    
-    if check_config_syntax; then
-        log_success "直连出站已添加"
-    else
-        log_error "配置错误，已恢复备份"
-        cp "$(ls -t $BACKUP_DIR/config_*.json | head -1)" "$CONFIG_FILE"
-    fi
-    
-    read -p "按 Enter 继续..."
-}
-
-add_socks_outbound() {
-    clear
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${YELLOW}添加 SOCKS5 出站${NC}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo ""
-    
-    read -p "请输入出站标签: " tag
-    read -p "请输入服务器地址: " server
-    read -p "请输入服务器端口: " port
-    read -p "请输入用户名 (可选): " username
-    read -p "请输入密码 (可选): " password
-    
-    if [ -z "$tag" ] || [ -z "$server" ] || [ -z "$port" ]; then
-        log_error "标签、服务器和端口不能为空"
-        read -p "按 Enter 继续..."
-        return 1
-    fi
-    
-    backup_config
-    
-    local new_outbound=$(cat <<EOF
-{
-  "type": "socks",
-  "tag": "$tag",
-  "server": "$server",
-  "server_port": $port
-EOF
-)
-
-    if [ -n "$username" ] && [ -n "$password" ]; then
-        new_outbound+=",\"username\": \"$username\",\"password\": \"$password\""
-    fi
-    
-    new_outbound+="}"
-    
-    jq ".outbounds += [$new_outbound]" "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
-    
-    if check_config_syntax; then
-        log_success "SOCKS5 出站已添加"
-    else
-        log_error "配置错误，已恢复备份"
-        cp "$(ls -t $BACKUP_DIR/config_*.json | head -1)" "$CONFIG_FILE"
-    fi
-    
-    read -p "按 Enter 继续..."
-}
-
-# ==================== 路由管理函数 ====================
-
-show_route_rules() {
-    clear
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${YELLOW}路由规则列表${NC}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo ""
-    
-    local count=$(jq '.route.rules | length' "$CONFIG_FILE" 2>/dev/null || echo 0)
-    
-    if [ "$count" -eq 0 ]; then
-        log_warn "暂无路由规则"
-        return
-    fi
-    
-    for ((i=0; i<count; i++)); do
-        local outbound=$(jq -r ".route.rules[$i].outbound" "$CONFIG_FILE")
-        local domain_count=$(jq ".route.rules[$i].domain // [] | length" "$CONFIG_FILE")
-        
-        echo "$((i+1)). 出站: $outbound (域名规则: $domain_count)"
-    done
-    
-    echo ""
-}
-
-add_route_rule() {
-    clear
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${YELLOW}添加路由规则${NC}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo ""
-    
-    read -p "请输入出站标签: " outbound
-    read -p "请输入域名 (多个用逗号分隔): " domains
-    
-    if [ -z "$outbound" ] || [ -z "$domains" ]; then
-        log_error "出站和域名不能为空"
-        read -p "按 Enter 继续..."
-        return 1
-    fi
-    
-    backup_config
-    
-    # 将逗号分隔的域名转换为 JSON 数组
-    local domain_array=$(echo "$domains" | tr ',' '\n' | jq -R . | jq -s .)
-    
-    local new_rule=$(cat <<EOF
-{
-  "domain": $domain_array,
-  "outbound": "$outbound"
-}
-EOF
-)
-
-    jq ".route.rules += [$new_rule]" "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
-    
-    if check_config_syntax; then
-        log_success "路由规则已添加"
-    else
-        log_error "配置错误，已恢复备份"
-        cp "$(ls -t $BACKUP_DIR/config_*.json | head -1)" "$CONFIG_FILE"
-    fi
-    
-    read -p "按 Enter 继续..."
-}
-
-# ==================== 系统信息函数 ====================
-
-show_system_info() {
-    clear
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${YELLOW}系统信息${NC}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo ""
-    
-    echo -e "${GREEN}操作系统:${NC}"
-    uname -a
-    echo ""
-    
-    echo -e "${GREEN}CPU 信息:${NC}"
-    grep "model name" /proc/cpuinfo | head -1
-    echo ""
-    
-    echo -e "${GREEN}内存信息:${NC}"
-    free -h
-    echo ""
-    
-    echo -e "${GREEN}磁盘信息:${NC}"
-    df -h /
-    echo ""
-    
-    echo -e "${GREEN}网络接口:${NC}"
-    ip addr show | grep "inet " | grep -v "127.0.0.1"
-    echo ""
-    
-    read -p "按 Enter 继续..."
-}
-
-show_network_stats() {
-    clear
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${YELLOW}网络统计 (按 Ctrl+C 退出)${NC}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo ""
-    
-    watch -n 1 'ss -s'
-}
-
-show_process_info() {
-    clear
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${YELLOW}Sing-box 进程信息${NC}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo ""
-    
-    ps aux | grep sing-box | grep -v grep
-    echo ""
-    read -p "按 Enter 继续..."
-}
-
-# ==================== 证书管理函数 ====================
-
-generate_self_signed_cert() {
-    clear
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${YELLOW}生成自签名证书${NC}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo ""
-    
-    read -p "请输入证书域名: " domain
-    read -p "请输入证书有效期 (天数, 默认: 365): " days
-    days=${days:-365}
-    
-    if [ -z "$domain" ]; then
-        log_error "域名不能为空"
-        read -p "按 Enter 继续..."
-        return 1
-    fi
-    
-    local cert_file="$WORK_DIR/server.crt"
-    local key_file="$WORK_DIR/server.key"
-    
-    log_info "生成自签名证书..."
-    
-    openssl req -x509 -newkey rsa:2048 -keyout "$key_file" -out "$cert_file" \
-        -days "$days" -nodes -subj "/CN=$domain" > /dev/null 2>&1
-    
-    if [ $? -eq 0 ]; then
-        chmod 600 "$key_file"
-        chmod 644 "$cert_file"
-        log_success "证书已生成"
-        echo -e "${GREEN}证书路径: $cert_file${NC}"
-        echo -e "${GREEN}密钥路径: $key_file${NC}"
-    else
-        log_error "证书生成失败"
-    fi
-    
-    read -p "按 Enter 继续..."
-}
-
-view_cert_info() {
-    clear
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${YELLOW}查看证书信息${NC}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo ""
-    
-    read -p "请输入证书文件路径: " cert_path
-    
-    if [ ! -f "$cert_path" ]; then
-        log_error "证书文件不存在"
-        read -p "按 Enter 继续..."
-        return 1
-    fi
-    
-    openssl x509 -in "$cert_path" -text -noout
-    echo ""
-    read -p "按 Enter 继续..."
-}
-
-# ==================== 备份恢复函数 ====================
-
-list_backups() {
-    clear
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${YELLOW}备份列表${NC}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo ""
-    
-    if [ ! -d "$BACKUP_DIR" ] || [ -z "$(ls -A $BACKUP_DIR)" ]; then
-        log_warn "暂无备份"
-        read -p "按 Enter 继续..."
-        return
-    fi
-    
-    local count=0
-    for backup in $(ls -t "$BACKUP_DIR"/config_*.json); do
-        count=$((count + 1))
-        local size=$(du -h "$backup" | cut -f1)
-        local time=$(stat -c %y "$backup" 2>/dev/null | cut -d' ' -f1,2 || stat -f "%Sm" "$backup" 2>/dev/null)
-        echo "$count. $(basename $backup) ($size) - $time"
-    done
-    
-    echo ""
-    read -p "按 Enter 继续..."
-}
-
-restore_backup() {
-    clear
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${YELLOW}恢复备份${NC}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo ""
-    
-    if [ ! -d "$BACKUP_DIR" ] || [ -z "$(ls -A $BACKUP_DIR)" ]; then
-        log_warn "暂无备份"
-        read -p "按 Enter 继续..."
-        return
-    fi
-    
-    local count=0
-    local -a backups
-    
-    for backup in $(ls -t "$BACKUP_DIR"/config_*.json); do
-        count=$((count + 1))
-        backups+=("$backup")
-        echo "$count. $(basename $backup)"
-    done
-    
-    echo ""
-    read -p "请选择要恢复的备份 (1-$count): " backup_num
-    
-    if ! [[ "$backup_num" =~ ^[0-9]+$ ]] || [ "$backup_num" -lt 1 ] || [ "$backup_num" -gt "$count" ]; then
-        log_error "无效选择"
-        read -p "按 Enter 继续..."
-        return 1
-    fi
-    
-    local restore_index=$((backup_num - 1))
-    local restore_file="${backups[$restore_index]}"
-    
-    read -p "确认恢复此备份吗? (y/n): " confirm
-    
-    if [ "$confirm" != "y" ]; then
-        log_warn "已取消恢复"
-        read -p "按 Enter 继续..."
-        return
-    fi
-    
-    cp "$restore_file" "$CONFIG_FILE"
-    
-    if check_config_syntax; then
-        log_success "备份已恢复"
-        read -p "是否立即重启服务? (y/n): " restart_confirm
-        if [ "$restart_confirm" = "y" ]; then
-            restart_service
-        fi
-    else
-        log_error "恢复的配置有错误"
-    fi
-    
-    read -p "按 Enter 继续..."
-}
-
-clean_old_backups() {
-    clear
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${YELLOW}清理旧备份${NC}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo ""
-    
-    read -p "请输入保留备份数量 (默认: 10): " keep_count
-    keep_count=${keep_count:-10}
-    
-    if ! [[ "$keep_count" =~ ^[0-9]+$ ]]; then
-        log_error "必须输入数字"
-        read -p "按 Enter 继续..."
-        return 1
-    fi
-    
-    local total=$(ls -1 "$BACKUP_DIR"/config_*.json 2>/dev/null | wc -l)
-    local delete_count=$((total - keep_count))
-    
-    if [ "$delete_count" -le 0 ]; then
-        log_info "备份数量已在限制内"
-        read -p "按 Enter 继续..."
-        return
-    fi
-    
-    log_info "将删除 $delete_count 个旧备份..."
-    ls -t "$BACKUP_DIR"/config_*.json | tail -n "$delete_count" | xargs rm -f
-    
-    log_success "旧备份已清理"
-    read -p "按 Enter 继续..."
-}
-
-# ==================== 主菜单函数 ====================
-
-show_main_menu() {
-    clear
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${YELLOW}   Sing-box 管理面板${NC}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo ""
-    echo -e "${GREEN}【服务管理】${NC}"
-    echo "1.  启动服务"
-    echo "2.  停止服务"
-    echo "3.  重启服务"
-    echo "4.  查看服务状态"
-    echo "5.  查看实时日志"
-    echo ""
-    echo -e "${GREEN}【节点管理】${NC}"
-    echo "6.  查看节点列表"
-    echo "7.  添加节点"
-    echo "8.  删除节点"
-    echo "9.  修改节点"
-    echo "10. 查看节点信息"
-    echo ""
-    echo -e "${GREEN}【配置管理】${NC}"
-    echo "11. 查看配置文件"
-    echo "12. 编辑配置文件"
-    echo "13. 格式化配置"
-    echo "14. 合并配置文件"
-    echo ""
-    echo -e "${GREEN}【出站管理】${NC}"
-    echo "15. 查看出站列表"
-    echo "16. 添加直连出站"
-    echo "17. 添加 SOCKS5 出站"
-    echo ""
-    echo -e "${GREEN}【路由管理】${NC}"
-    echo "18. 查看路由规则"
-    echo "19. 添加路由规则"
-    echo ""
-    echo -e "${GREEN}【证书管理】${NC}"
-    echo "20. 生成自签名证书"
-    echo "21. 查看证书信息"
-    echo ""
-    echo -e "${GREEN}【备份恢复】${NC}"
-    echo "22. 查看备份列表"
-    echo "23. 恢复备份"
-    echo "24. 清理旧备份"
-    echo ""
-    echo -e "${GREEN}【系统信息】${NC}"
-    echo "25. 查看系统信息"
-    echo "26. 查看网络统计"
-    echo "27. 查看进程信息"
-    echo ""
-    echo -e "${GREEN}【其他】${NC}"
-    echo "28. 检查更新"
-    echo "29. 卸载 Sing-box"
-    echo "0.  退出"
-    echo ""
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    read -p "请选择操作 (0-29): " choice
-}
-
-# ==================== 主程序 ====================
-
-main() {
-    check_root
-    check_sing_box_installed
-    detect_init_system
-    
+# 添加节点菜单
+add_inbound_menu() {
     while true; do
-        show_main_menu
+        clear
+        echo -e "${BLUE}╔════════════════════════════════════════╗${NC}"
+        echo -e "${BLUE}║      添加服务端节点                    ║${NC}"
+        echo -e "${BLUE}╚════════════════════════════════════════╝${NC}"
+        echo ""
+        echo "请选择要添加的节点类型:"
+        echo ""
+        echo "  1) Shadowsocks"
+        echo "  2) VLESS + Reality"
+        echo "  3) Hysteria2"
+        echo "  0) 返回主菜单"
+        echo ""
+        read -p "请输入选项 (0-3): " choice
         
         case $choice in
-            1) start_service ;;
-            2) stop_service ;;
-            3) restart_service ;;
-            4) show_service_status ;;
-            5) show_realtime_logs ;;
-            6) show_inbound_list; read -p "按 Enter 继续..." ;;
-            7) add_node_menu ;;
-            8) delete_node ;;
-            9) modify_node ;;
-            10) show_node_info ;;
-            11) view_config ;;
-            12) edit_config ;;
-            13) format_config ;;
-            14) merge_config ;;
-            15) show_outbound_list; read -p "按 Enter 继续..." ;;
-            16) add_direct_outbound ;;
-            17) add_socks_outbound ;;
-            18) show_route_rules; read -p "按 Enter 继续..." ;;
-            19) add_route_rule ;;
-            20) generate_self_signed_cert ;;
-            21) view_cert_info ;;
-            22) list_backups ;;
-            23) restore_backup ;;
-            24) clean_old_backups ;;
-            25) show_system_info ;;
-            26) show_network_stats ;;
-            27) show_process_info ;;
-            28) check_updates ;;
-            29) uninstall_singbox ;;
+            1)
+                add_shadowsocks
+                ;;
+            2)
+                add_vless_reality
+                ;;
+            3)
+                add_hysteria2
+                ;;
             0)
-                log_info "退出管理面板"
-                exit 0
+                return
                 ;;
             *)
-                log_error "无效选择，请重试"
-                read -p "按 Enter 继续..."
+                log_error "无效的选项"
+                sleep 1
                 ;;
         esac
     done
 }
 
-# ==================== 脚本入口 ====================
+# 主菜单
+main_menu() {
+    while true; do
+        clear
+        echo -e "${BLUE}╔════════════════════════════════════════╗${NC}"
+        echo -e "${BLUE}║          S-UI Sing-box 管理面板        ║${NC}"
+        echo -e "${BLUE}╚════════════════════════════════════════╝${NC}"
+        echo ""
+        
+        # 检查 sing-box 是否已安装
+        if check_singbox_installed; then
+            STATUS=$(get_singbox_status)
+            if [ "$STATUS" = "运行中" ]; then
+                echo -e "状态: ${GREEN}$STATUS${NC}"
+            else
+                echo -e "状态: ${RED}$STATUS${NC}"
+            fi
+        else
+            echo -e "状态: ${RED}未安装${NC}"
+        fi
+        
+        echo ""
+        echo "请选择操作:"
+        echo ""
+        echo "  1) 查看运行状态"
+        echo "  2) 查看配置文件"
+        echo "  3) 启动 Sing-box"
+        echo "  4) 停止 Sing-box"
+        echo "  5) 重启 Sing-box"
+        echo "  6) 添加服务端节点"
+        echo "  0) 退出"
+        echo ""
+        read -p "请输入选项 (0-6): " choice
+        
+        case $choice in
+            1)
+                view_status
+                ;;
+            2)
+                view_config
+                ;;
+            3)
+                start_singbox
+                ;;
+            4)
+                stop_singbox
+                ;;
+            5)
+                restart_singbox
+                ;;
+            6)
+                add_inbound_menu
+                ;;
+            0)
+                log_info "退出管理面板"
+                exit 0
+                ;;
+            *)
+                log_error "无效的选项"
+                sleep 1
+                ;;
+        esac
+    done
+}
 
-# 检查是否以 root 身份运行
-if [ "$EUID" -ne 0 ]; then
-    echo -e "${RED}错误: 此脚本必须以 root 身份运行${NC}"
-    exit 1
-fi
+# 检查依赖
+check_dependencies() {
+    local missing_deps=()
+    
+    if ! command -v jq &> /dev/null; then
+        missing_deps+=("jq")
+    fi
+    
+    if ! command -v openssl &> /dev/null; then
+        missing_deps+=("openssl")
+    fi
+    
+    if [ ${#missing_deps[@]} -gt 0 ]; then
+        log_warn "缺少以下依赖: ${missing_deps[*]}"
+        log_info "正在安装缺失的依赖..."
+        
+        if [ -f /etc/os-release ]; then
+            . /etc/os-release
+            OS=$ID
+            
+            case $OS in
+                debian|ubuntu)
+                    apt-get update
+                    apt-get install -y "${missing_deps[@]}"
+                    ;;
+                centos|rhel|fedora)
+                    yum install -y "${missing_deps[@]}"
+                    ;;
+                alpine)
+                    apk update
+                    apk add --no-cache "${missing_deps[@]}"
+                    ;;
+                *)
+                    log_warn "无法自动安装依赖，请手动安装: ${missing_deps[*]}"
+                    ;;
+            esac
+        fi
+    fi
+}
 
-# 运行主程序
+# 主函数
+main() {
+    # 检查是否为 root
+    check_root
+    
+    # 检测 init 系统
+    detect_init_system
+    
+    # 检查依赖
+    check_dependencies
+    
+    # 如果传入参数 "install"，则执行安装
+    if [ "$1" = "install" ]; then
+        install_singbox
+        exit $?
+    fi
+    
+    # 检查 sing-box 是否已安装
+    if ! check_singbox_installed; then
+        clear
+        echo -e "${BLUE}╔════════════════════════════════════════╗${NC}"
+        echo -e "${BLUE}║          S-UI Sing-box 管理面板        ║${NC}"
+        echo -e "${BLUE}╚════════════════════════════════════════╝${NC}"
+        echo ""
+        log_warn "检测到 sing-box 未安装"
+        echo ""
+        read -p "是否现在安装 sing-box? (y/n): " install_choice
+        
+        if [ "$install_choice" = "y" ] || [ "$install_choice" = "Y" ]; then
+            install_singbox
+            if [ $? -eq 0 ]; then
+                log_success "sing-box 安装完成，进入管理面板..."
+                sleep 2
+                main_menu
+            else
+                log_error "sing-box 安装失败"
+                exit 1
+            fi
+        else
+            log_info "退出"
+            exit 0
+        fi
+    else
+        # 进入主菜单
+        main_menu
+    fi
+}
+
+# 运行主函数
 main "$@"
