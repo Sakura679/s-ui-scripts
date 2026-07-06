@@ -13,11 +13,13 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # 配置变量
+SUI_BIN="/user/local/bin"
 WORK_DIR="/etc/sing-box"
 CONFIG_FILE="$WORK_DIR/conf/config.json"
 INIT_SYSTEM=""
 SCRIPT_DIR="https://raw.githubusercontent.com/Sakura679/s-ui-scripts/main"
 SINGBOX_INSTALL_SCRIPT="$SCRIPT_DIR/singbox_install.sh"
+SUI_INSTALL_SCRIPT="$SCRIPT_DIR/s-ui_install.sh"
 
 # 日志函数
 log_info() {
@@ -75,6 +77,22 @@ install_singbox() {
         return 0
     else
         log_error "sing-box 安装失败"
+        return 1
+    fi
+}
+
+# 安装面板 s-ui
+install_sui() {
+    log_info "开始安装 s-ui..."
+    
+    curl -Ls "$SUI_INSTALL_SCRIPT" -o "$SUI_BIN/s-ui"
+    chmod +x "$SUI_BIN/s-ui"
+
+    if [ -f "$SUI_BIN/s-ui" ]; then
+        log_success "s-ui 安装成功"
+        return 0
+    else
+        log_error "s-ui 安装失败"
         return 1
     fi
 }
@@ -699,6 +717,7 @@ main() {
     # 如果传入参数 "install"，则执行安装
     if [ "$1" = "install" ]; then
         install_singbox
+        install_sui
         exit $?
     fi
     
@@ -715,6 +734,7 @@ main() {
         
         if [ "$install_choice" = "y" ] || [ "$install_choice" = "Y" ]; then
             install_singbox
+            install_sui
             if [ $? -eq 0 ]; then
                 log_success "sing-box 安装完成，进入管理面板..."
                 sleep 2
