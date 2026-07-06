@@ -13,30 +13,30 @@ bash <(curl -Ls https://raw.githubusercontent.com/Sakura679/s-ui-scripts/main/s-
 
 ```bash
 # 下载脚本
-curl -O https://raw.githubusercontent.com/SagerNet/sing-box/main/install.sh
+curl -O https://raw.githubusercontent.com/Sakura679/s-ui-scripts/main/s-ui_install.sh
 
 # 或使用 wget
-wget https://raw.githubusercontent.com/SagerNet/sing-box/main/install.sh
+wget https://raw.githubusercontent.com/Sakura679/s-ui-scripts/main/s-ui_install.sh
 
 # 赋予执行权限
-chmod +x install.sh
+chmod +x s-ui_install.sh
 
 # 执行安装
-sudo bash install.sh
+sudo bash s-ui_install.sh
 ```
 ### 二、安装选项
 ```bash
 # 安装 (默认)
-sudo bash install.sh install
+sudo bash s-ui_install.sh install
 
 # 卸载
-sudo bash install.sh uninstall
+sudo bash s-ui_install.sh uninstall
 
 # 更新
-sudo bash install.sh update
+sudo bash s-ui_install.sh update
 
 # 显示帮助
-sudo bash install.sh help
+sudo bash s-ui_install.sh help
 ```
 ### 三、管理面板使用
 安装完成后，运行以下命令启动管理面板：
@@ -219,17 +219,4 @@ sudo sing-box check -c /etc/sing-box/config.json
 # 重启服务应用配置
 sudo systemctl restart sing-box
 ```
-### 八、故障排查
-查看详细错误日志
-```bash
-journalctl -u sing-box -n 50 --no-pager
-```
-检查端口占用
-```bash
-# 检查特定端口
-netstat -tlnp | grep :8388
 
-# 或使用 ss
-ss -tlnp | grep :8388
-```
-验
