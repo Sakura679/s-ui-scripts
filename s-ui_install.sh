@@ -13,7 +13,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # 配置变量
-SUI_BIN="/user/local/bin"
+SUI_BIN="/usr/local/bin"
 WORK_DIR="/etc/sing-box"
 CONFIG_FILE="$WORK_DIR/conf/config.json"
 INIT_SYSTEM=""
@@ -85,7 +85,7 @@ install_singbox() {
 install_sui() {
     log_info "开始安装 s-ui..."
     
-    curl -Ls "$SUI_INSTALL_SCRIPT" -o "$SUI_BIN/s-ui"
+    wget "$SUI_INSTALL_SCRIPT" -O "$SUI_BIN/s-ui"
     chmod +x "$SUI_BIN/s-ui"
 
     if [ -f "$SUI_BIN/s-ui" ]; then
