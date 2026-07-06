@@ -68,7 +68,7 @@ check_singbox_installed() {
 install_singbox() {
     log_info "开始安装 sing-box..."
     
-    bash "$SINGBOX_INSTALL_SCRIPT"
+    bash <(curl -Ls "$SINGBOX_INSTALL_SCRIPT")
     
     if check_singbox_installed; then
         log_success "sing-box 安装成功"
