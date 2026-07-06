@@ -1050,55 +1050,26 @@ add_inbound_to_config() {
     local new_inbound="$1"
     local config_file="$SING_BOX_CONFIG_DIR/config.json"
     
-    # 验证输入的 JSON 格式
-    if ! echo "$new_inbound" | python3 -m json.tool > /dev/null 2>&1; then
-        print_error "输入的 inbound 配置 JSON 格式错误"
-        return 1
-    fi
-    
     # 使用 Python 添加 inbound
     python3 << 'EOFPYTHON'
 import json
 import sys
 
 try:
-    config_file = '$config_file'
+    with open('$config_file', 'r') as f:
+        config = json.load(f)
     
-    # 读取现有配置
-    try:
-        with open(config_file, 'r', encoding='utf-8') as f:
-            config = json.load(f)
-    except FileNotFoundError:
-        # 如果文件不存在，创建新配置
-        config = {
-            "log": {"level": "info"},
-            "inbounds": [],
-            "outbounds": [
-                {"type": "direct", "tag": "direct"},
-                {"type": "block", "tag": "block"}
-            ]
-        }
+    new_inbound = json.loads('''$new_inbound''')
     
-    # 解析新的 inbound
-    new_inbound_str = '''$new_inbound'''
-    new_inbound = json.loads(new_inbound_str)
-    
-    # 确保 inbounds 数组存在
     if 'inbounds' not in config:
         config['inbounds'] = []
     
-    # 添加新的 inbound
     config['inbounds'].append(new_inbound)
     
-    # 写入配置文件
-    with open(config_file, 'w', encoding='utf-8') as f:
+    with open('$config_file', 'w') as f:
         json.dump(config, f, indent=2, ensure_ascii=False)
     
     print("配置已更新")
-    
-except json.JSONDecodeError as e:
-    print(f"JSON 解析错误: {e}", file=sys.stderr)
-    sys.exit(1)
 except Exception as e:
     print(f"错误: {e}", file=sys.stderr)
     sys.exit(1)
