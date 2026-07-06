@@ -1427,8 +1427,8 @@ show_main_menu() {
 
 main() {
     check_root
-    check_dependencies
-    init_environment
+    check_sing_box_installed
+    detect_init_system
     
     while true; do
         show_main_menu
