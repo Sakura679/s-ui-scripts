@@ -68,11 +68,6 @@ check_singbox_installed() {
 install_singbox() {
     log_info "开始安装 sing-box..."
     
-    if [ ! -f "$SINGBOX_INSTALL_SCRIPT" ]; then
-        log_error "找不到安装脚本: $SINGBOX_INSTALL_SCRIPT"
-        exit 1
-    fi
-    
     bash "$SINGBOX_INSTALL_SCRIPT"
     
     if check_singbox_installed; then
