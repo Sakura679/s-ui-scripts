@@ -2,6 +2,7 @@
 
 # Sing-box 1.14.0-alpha.35 一键安装脚本
 # 支持系统: Debian, Ubuntu, CentOS, Alpine, Fedora
+# 支持 init 系统: systemd 和 OpenRC
 
 set -e
 
@@ -17,6 +18,8 @@ WORK_DIR="/etc/sing-box"
 TEMP_DIR="/tmp/sing-box-install"
 GITHUB_PROXY="https://github.com"
 SERVICE_FILE="/etc/systemd/system/sing-box.service"
+OPENRC_SERVICE_FILE="/etc/init.d/sing-box"
+INIT_SYSTEM=""  # 将在检测时设置
 
 # 日志函数
 log_info() {
@@ -52,6 +55,19 @@ detect_system() {
     log_info "检测到系统: $OS $VER"
 }
 
+# 检测 init 系统
+detect_init_system() {
+    if command -v systemctl &> /dev/null; then
+        INIT_SYSTEM="systemd"
+        log_info "检测到 init 系统: systemd"
+    elif command -v rc-service &> /dev/null; then
+        INIT_SYSTEM="openrc"
+        log_info "检测到 init 系统: OpenRC"
+    else
+        log_error "无法检测 init 系统，既不支持 systemd 也不支持 OpenRC"
+    fi
+}
+
 # 检测架构
 detect_arch() {
     ARCH=$(uname -m)
@@ -80,14 +96,14 @@ install_dependencies() {
     case $OS in
         debian|ubuntu)
             apt-get update
-            apt-get install -y wget curl tar gzip
+            apt-get install -y wget curl tar gzip openssl
             ;;
         centos|rhel|fedora)
-            yum install -y wget curl tar gzip
+            yum install -y wget curl tar gzip openssl
             ;;
         alpine)
             apk update
-            apk add --no-cache wget curl tar gzip
+            apk add --no-cache wget curl tar gzip openssl
             ;;
         *)
             log_warn "未知系统，跳过依赖安装"
@@ -194,9 +210,41 @@ EOF
     log_info "Systemd 服务已创建"
 }
 
-# 启动服务
-start_service() {
-    log_info "启动 Sing-box 服务..."
+# 创建 OpenRC 服务文件
+create_openrc_service() {
+    log_info "创建 OpenRC 服务..."
+    
+    cat > "$OPENRC_SERVICE_FILE" << 'EOF'
+#!/sbin/openrc-run
+
+description="Sing-box Service"
+command="/etc/sing-box/sing-box"
+command_args="run -C /etc/sing-box/conf"
+pidfile="/run/sing-box.pid"
+command_background="true"
+
+depend() {
+    need net
+}
+
+start_pre() {
+    mkdir -p /run/sing-box
+}
+
+stop() {
+    ebegin "Stopping ${RC_SVCNAME}"
+    start-stop-daemon --stop --pidfile "${pidfile}" --exec "${command}"
+    eend $?
+}
+EOF
+    
+    chmod +x "$OPENRC_SERVICE_FILE"
+    log_info "OpenRC 服务已创建"
+}
+
+# 启动服务 (systemd)
+start_service_systemd() {
+    log_info "启动 Sing-box 服务 (systemd)..."
     
     systemctl daemon-reload
     systemctl enable sing-box
@@ -211,8 +259,33 @@ start_service() {
     fi
 }
 
-# 显示状态
-show_status() {
+# 启动服务 (OpenRC)
+start_service_openrc() {
+    log_info "启动 Sing-box 服务 (OpenRC)..."
+    
+    rc-update add sing-box default
+    rc-service sing-box start
+    
+    sleep 2
+    
+    if rc-service sing-box status > /dev/null 2>&1; then
+        log_info "Sing-box 服务已启动"
+    else
+        log_error "Sing-box 服务启动失败"
+    fi
+}
+
+# 启动服务 (通用)
+start_service() {
+    if [ "$INIT_SYSTEM" = "systemd" ]; then
+        start_service_systemd
+    elif [ "$INIT_SYSTEM" = "openrc" ]; then
+        start_service_openrc
+    fi
+}
+
+# 显示状态 (systemd)
+show_status_systemd() {
     log_info "Sing-box 版本信息:"
     "$WORK_DIR/sing-box" version
     
@@ -223,19 +296,40 @@ show_status() {
     log_info "日志文件位置: $WORK_DIR/logs/"
 }
 
+# 显示状态 (OpenRC)
+show_status_openrc() {
+    log_info "Sing-box 版本信息:"
+    "$WORK_DIR/sing-box" version
+    
+    log_info "服务状态:"
+    rc-service sing-box status
+    
+    log_info "配置文件位置: $WORK_DIR/conf/config.json"
+    log_info "日志文件位置: $WORK_DIR/logs/"
+}
+
+# 显示状态 (通用)
+show_status() {
+    if [ "$INIT_SYSTEM" = "systemd" ]; then
+        show_status_systemd
+    elif [ "$INIT_SYSTEM" = "openrc" ]; then
+        show_status_openrc
+    fi
+}
+
 # 清理临时文件
 cleanup() {
     log_info "清理临时文件..."
     rm -rf "$TEMP_DIR"
 }
 
-# 显示使用说明
-show_usage() {
+# 显示使用说明 (systemd)
+show_usage_systemd() {
     cat << EOF
 
 ${GREEN}=== Sing-box 安装完成 ===${NC}
 
-${YELLOW}常用命令:${NC}
+${YELLOW}常用命令 (systemd):${NC}
   启动服务:   systemctl start sing-box
   停止服务:   systemctl stop sing-box
   重启服务:   systemctl restart sing-box
@@ -258,9 +352,48 @@ ${YELLOW}下一步:${NC}
 EOF
 }
 
-# 卸载函数
-uninstall() {
-    log_warn "卸载 Sing-box..."
+# 显示使用说明 (OpenRC)
+show_usage_openrc() {
+    cat << EOF
+
+${GREEN}=== Sing-box 安装完成 ===${NC}
+
+${YELLOW}常用命令 (OpenRC):${NC}
+  启动服务:   rc-service sing-box start
+  停止服务:   rc-service sing-box stop
+  重启服务:   rc-service sing-box restart
+  查看状态:   rc-service sing-box status
+  查看日志:   tail -f /var/log/messages
+
+${YELLOW}文件位置:${NC}
+  可执行文件: $WORK_DIR/sing-box
+  配置文件:   $WORK_DIR/conf/config.json
+  日志目录:   $WORK_DIR/logs/
+  服务脚本:   $OPENRC_SERVICE_FILE
+
+${YELLOW}版本信息:${NC}
+  Sing-box 版本: $SING_BOX_VERSION
+
+${YELLOW}下一步:${NC}
+  1. 编辑配置文件: nano $WORK_DIR/conf/config.json
+  2. 重启服务: rc-service sing-box restart
+  3. 查看日志: tail -f /var/log/messages
+
+EOF
+}
+
+# 显示使用说明 (通用)
+show_usage() {
+    if [ "$INIT_SYSTEM" = "systemd" ]; then
+        show_usage_systemd
+    elif [ "$INIT_SYSTEM" = "openrc" ]; then
+        show_usage_openrc
+    fi
+}
+
+# 卸载函数 (systemd)
+uninstall_systemd() {
+    log_warn "卸载 Sing-box (systemd)..."
     
     systemctl stop sing-box 2>/dev/null || true
     systemctl disable sing-box 2>/dev/null || true
@@ -268,6 +401,27 @@ uninstall() {
     rm -rf "$WORK_DIR"
     
     log_info "Sing-box 已卸载"
+}
+
+# 卸载函数 (OpenRC)
+uninstall_openrc() {
+    log_warn "卸载 Sing-box (OpenRC)..."
+    
+    rc-service sing-box stop 2>/dev/null || true
+    rc-update del sing-box default 2>/dev/null || true
+    rm -f "$OPENRC_SERVICE_FILE"
+    rm -rf "$WORK_DIR"
+    
+    log_info "Sing-box 已卸载"
+}
+
+# 卸载函数 (通用)
+uninstall() {
+    if [ "$INIT_SYSTEM" = "systemd" ]; then
+        uninstall_systemd
+    elif [ "$INIT_SYSTEM" = "openrc" ]; then
+        uninstall_openrc
+    fi
 }
 
 # 主函数
@@ -280,18 +434,29 @@ main() {
     
     # 检查参数
     if [ "$1" = "uninstall" ]; then
+        check_root
+        detect_system
+        detect_init_system
         uninstall
         exit 0
     fi
     
     check_root
     detect_system
+    detect_init_system
     detect_arch
     install_dependencies
     create_directories
     download_singbox
     create_config
-    create_systemd_service
+    
+    # 根据 init 系统创建相应的服务文件
+    if [ "$INIT_SYSTEM" = "systemd" ]; then
+        create_systemd_service
+    elif [ "$INIT_SYSTEM" = "openrc" ]; then
+        create_openrc_service
+    fi
+    
     start_service
     show_status
     cleanup
