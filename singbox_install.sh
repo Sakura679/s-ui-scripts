@@ -139,7 +139,7 @@ download_singbox() {
     log_info "下载地址: $DOWNLOAD_URL"
     
     cd "$TEMP_DIR"
-    if ! wget -q "$DOWNLOAD_URL" -O "$FILENAME"; then
+    if ! wget "$DOWNLOAD_URL" -O "$FILENAME"; then
         log_error "下载失败，请检查网络连接"
     fi
     
