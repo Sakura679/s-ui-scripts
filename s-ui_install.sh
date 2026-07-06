@@ -286,12 +286,6 @@ generate_short_id() {
     openssl rand -hex 3
 }
 
-# 生成随机私钥
-generate_private_key() {
-    # openssl rand -base64 32
-    cP-CQW7_ltG-dStdp10eKzTPOcv_o3YYeqdD5HZC10Q
-}
-
 # 添加 Shadowsocks 节点
 add_shadowsocks() {
     clear
