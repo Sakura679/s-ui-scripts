@@ -53,7 +53,7 @@ s-ui
       "type": "shadowsocks",
       "tag": "ss-in",
       "listen": "::",
-      "listen_port": 40443,
+      "listen_port": 32132,
       "method": "aes-256-gcm",
       "password": "Iq6NSSXsU5GypaQYlQaJ4e9P40zTb7mHmv4tynH5qHY="
     }
@@ -66,7 +66,7 @@ s-ui
       "type": "vless",
       "tag": "reality-in",
       "listen": "::",
-      "listen_port": 40443,
+      "listen_port": 32132,
       "users": [
         {
           "uuid": "26800d23-57be-40b0-8fbd-b9edc0194082",
