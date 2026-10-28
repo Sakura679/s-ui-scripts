@@ -53,7 +53,7 @@ s-ui
       "type": "shadowsocks",
       "tag": "ss-in",
       "listen": "::",
-      "listen_port": 12123,
+      "listen_port": 40443,
       "method": "aes-256-gcm",
       "password": "Iq6NSSXsU5GypaQYlQaJ4e9P40zTb7mHmv4tynH5qHY="
     }
@@ -66,15 +66,13 @@ s-ui
       "type": "vless",
       "tag": "reality-in",
       "listen": "::",
-      "listen_port": 12123,
-
+      "listen_port": 40443,
       "users": [
         {
           "uuid": "26800d23-57be-40b0-8fbd-b9edc0194082",
           "flow": "xtls-rprx-vision"
         }
       ],
-
       "tls": {
         "enabled": true,
         "server_name": "gw.alicdn.com",
@@ -84,9 +82,7 @@ s-ui
             "server": "gw.alicdn.com",
             "server_port": 443
           },
-
           "private_key": "cP-CQW7_ltG-dStdp10eKzTPOcv_o3YYeqdD5HZC10Q",
-
           "short_id": [
             "db1df8"
           ]
@@ -102,14 +98,12 @@ s-ui
       "type": "hysteria2",
       "tag": "hy2-in",
       "listen": "::",
-      "listen_port": 12123,
-
+      "listen_port": 40443,
       "users": [
         {
           "password": "/31/ZomnpGLMMaIJjDg/ppDb"
         }
       ],
-
       "tls": {
         "enabled": true,
         "certificate_path": "/etc/sing-box/server.crt",
